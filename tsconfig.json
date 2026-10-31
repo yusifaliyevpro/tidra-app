@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "es2024",
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node", "vite/client"],
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src", "tests", "*.ts"],
+  "exclude": ["node_modules", "dist", "src-tauri"]
+}

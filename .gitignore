@@ -1,0 +1,18 @@
+node_modules
+dist
+coverage
+*.tsbuildinfo
+*.log
+.env
+.env.*
+!.env.example
+
+# Tauri / Rust
+src-tauri/target
+src-tauri/gen/schemas
+
+# Editors and agents
+.DS_Store
+.idea
+.claude
+.agents
