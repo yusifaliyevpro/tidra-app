@@ -1,0 +1,225 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "Cascadia Code", monospace;
+
+  --color-bg: #0b0b0c;
+  --color-surface: #111113;
+  --color-raised: #17171a;
+  --color-hover: #1d1d21;
+  --color-line: rgb(255 255 255 / 0.07);
+  --color-line-strong: rgb(255 255 255 / 0.12);
+  --color-fg: #ededed;
+  --color-muted: #8b8b90;
+  --color-faint: #5d5d63;
+
+  --color-accent: var(--accent, #3a74d8);
+  --color-accent-fg: #ffffff;
+
+  --color-ok: #4ade80;
+  --color-warn: #fbbf24;
+  --color-bad: #f87171;
+  --color-info: #60a5fa;
+
+  --text-xs: 11px;
+  --text-xs--line-height: 16px;
+  --text-sm: 12px;
+  --text-sm--line-height: 18px;
+  --text-base: 13px;
+  --text-base--line-height: 20px;
+  --text-lg: 15px;
+  --text-lg--line-height: 22px;
+  --text-xl: 18px;
+  --text-xl--line-height: 26px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  html {
+    color-scheme: dark;
+    background: var(--color-bg);
+  }
+
+  /* Mica shows through only behind the sidebar; the rest stays opaque for legibility. */
+  html.native {
+    background: transparent;
+  }
+
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    color: var(--color-fg);
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "ss01";
+    user-select: none;
+    overflow: hidden;
+  }
+
+  /* No rubber-band bounce at scroll ends; native lists stop dead. */
+  *,
+  *::before,
+  *::after {
+    overscroll-behavior: none;
+  }
+
+  /* Native controls keep the arrow cursor; only text fields show the I-beam. */
+  button,
+  a,
+  label,
+  summary,
+  select,
+  [role="tab"],
+  [role="switch"],
+  input[type="checkbox"],
+  input[type="color"] {
+    cursor: default;
+  }
+
+  img,
+  a {
+    -webkit-user-drag: none;
+  }
+
+  input,
+  textarea,
+  [data-selectable],
+  pre,
+  code {
+    user-select: text;
+  }
+
+  :focus-visible {
+    outline: 1.5px solid var(--color-accent);
+    outline-offset: 1px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(255 255 255 / 0.08);
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(255 255 255 / 0.16);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* Loading indicators wait a moment, so quick loads never flash a spinner. */
+@keyframes appear {
+  to {
+    opacity: 1;
+  }
+}
+
+@utility appear-late {
+  opacity: 0;
+  animation: appear 120ms var(--ease-out) 250ms forwards;
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@utility drag {
+  -webkit-app-region: drag;
+}
+
+@utility no-drag {
+  -webkit-app-region: no-drag;
+}
+
+.markdown {
+  font-size: var(--text-base);
+  line-height: 1.6;
+  color: var(--color-fg);
+  overflow-wrap: anywhere;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  font-weight: 500;
+  margin: 1em 0 0.4em;
+  font-size: var(--text-base);
+}
+.markdown h1,
+.markdown h2 {
+  font-size: var(--text-lg);
+}
+.markdown p,
+.markdown ul,
+.markdown ol {
+  margin: 0.5em 0;
+}
+.markdown ul,
+.markdown ol {
+  padding-left: 1.25em;
+}
+.markdown ul {
+  list-style: disc;
+}
+.markdown ol {
+  list-style: decimal;
+}
+.markdown a {
+  color: var(--color-accent);
+}
+.markdown code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--color-raised);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.35em;
+}
+.markdown pre {
+  background: var(--color-raised);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+.markdown pre code {
+  background: none;
+  padding: 0;
+}
+.markdown blockquote {
+  border-left: 2px solid var(--color-line-strong);
+  padding-left: 10px;
+  color: var(--color-muted);
+}
+.markdown img {
+  max-width: 100%;
+}
