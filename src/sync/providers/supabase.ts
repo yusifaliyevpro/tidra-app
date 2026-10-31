@@ -65,8 +65,7 @@ function check(error: { message: string } | null) {
 export const supabase: SyncProvider = {
   id: "supabase",
   label: "Supabase",
-  description:
-    "A Postgres table in your Supabase project. Uses the service-role key, which stays in this device's keychain and inside your encrypted vault.",
+  description: "Run the setup SQL once, then use the service-role key.",
   fields: [
     { key: "url", label: "Project URL", placeholder: "https://your-project.supabase.co" },
     { key: "serviceKey", label: "Service-role key", secret: true },

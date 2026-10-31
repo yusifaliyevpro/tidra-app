@@ -27,11 +27,8 @@ export function GitHubSettings() {
       secretKey={SECRET_KEYS.github}
       label="Token"
       placeholder="ghp_…"
-      description={
-        <>
-          repo, notifications, workflow · <ExternalLink href={TOKEN_URL}>Create</ExternalLink>
-        </>
-      }
+      // The link preselects the repo, notifications and workflow scopes.
+      description={<ExternalLink href={TOKEN_URL}>Create a token</ExternalLink>}
       extra={
         <Button size="sm" variant="ghost" loading={fromCli.isPending} onClick={() => fromCli.mutate()}>
           Use gh CLI

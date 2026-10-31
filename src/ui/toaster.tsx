@@ -6,7 +6,11 @@ import { currentToasts, dismiss, subscribeToasts } from "./toast";
 export function Toaster() {
   const items = useSyncExternalStore(subscribeToasts, currentToasts);
   return (
-    <div className="pointer-events-none fixed right-4 bottom-4 z-50 flex w-80 flex-col gap-2" aria-live="polite">
+    // Centered above the footer action bars, so a toast never covers Continue or Update.
+    <div
+      className="pointer-events-none fixed bottom-20 left-1/2 z-50 flex w-96 -translate-x-1/2 flex-col gap-2"
+      aria-live="polite"
+    >
       {items.map((item) => (
         <div
           key={item.id}

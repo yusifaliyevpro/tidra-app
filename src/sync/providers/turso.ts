@@ -34,7 +34,7 @@ const RowSchema = z.compile(
 export const turso: SyncProvider = {
   id: "turso",
   label: "Turso",
-  description: "A libSQL database on Turso, or your own sqld server. Tidra creates its tables on first connect.",
+  description: "Turso or your own sqld server. Tables are created on first connect.",
   fields: [
     { key: "url", label: "Database URL", placeholder: "libsql://your-db-your-org.turso.io" },
     { key: "authToken", label: "Auth token", secret: true },
