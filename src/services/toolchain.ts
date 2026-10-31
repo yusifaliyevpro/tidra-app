@@ -1,0 +1,140 @@
+import semver from "semver";
+import { emptyConfig } from "@/engine/npmrc";
+import { fetchWithRetry } from "@/engine/registry";
+import {
+  parseNodeIndex,
+  parsePnpmGlobalOutdated,
+  parseVersionOutput,
+  parseWingetUpgrades,
+  type GlobalOutdated,
+  type WingetUpgrade,
+} from "@/engine/toolchain";
+import type { Services } from "./context";
+import { readSnapshot, writeSnapshot } from "./snapshot";
+
+export interface ToolInfo {
+  id: string;
+  label: string;
+  installed?: string;
+  latest?: string;
+  note?: string;
+  outdated: boolean;
+  /** Command line the user can run to update, shown and copyable rather than run blindly. */
+  updateHint?: string;
+}
+
+export interface ToolchainSnapshot {
+  tools: ToolInfo[];
+  globals: GlobalOutdated[];
+  winget: WingetUpgrade[];
+  wingetAvailable: boolean;
+  updatedAt: string;
+}
+
+async function installedVersion(svc: Services, program: string, args = ["--version"]) {
+  const result = await svc.io.run(program, args);
+  return result.code === 0 ? parseVersionOutput(result.stdout || result.stderr) : undefined;
+}
+
+async function npmLatest(svc: Services, name: string) {
+  return (
+    await svc
+      .registry(emptyConfig())
+      .abbreviated(name)
+      .catch(() => null)
+  )?.["dist-tags"].latest;
+}
+
+async function githubLatestTag(svc: Services, owner: string, repo: string) {
+  const tag = (await (await svc.github()).latestRelease(owner, repo).catch(() => undefined))?.tag;
+  return tag ? parseVersionOutput(tag) : undefined;
+}
+
+const isOutdated = (installed?: string, latest?: string) =>
+  Boolean(installed && latest && semver.valid(installed) && semver.valid(latest) && semver.lt(installed, latest));
+
+export async function refreshToolchain(svc: Services): Promise<ToolchainSnapshot> {
+  const nodeIndexRequest = fetchWithRetry(svc.io.fetch, "https://nodejs.org/dist/index.json", {})
+    .then((r) => r.json())
+    .then(parseNodeIndex)
+    .catch(() => ({ lts: undefined, current: undefined }));
+
+  const [nodeIndex, node, pnpm, npm, git, rustc, cargo, pnpmLatest, npmLatestVersion, gitLatest, rustLatest] =
+    await Promise.all([
+      nodeIndexRequest,
+      installedVersion(svc, "node"),
+      installedVersion(svc, "pnpm"),
+      installedVersion(svc, "npm"),
+      installedVersion(svc, "git"),
+      installedVersion(svc, "rustc"),
+      installedVersion(svc, "cargo"),
+      npmLatest(svc, "pnpm"),
+      npmLatest(svc, "npm"),
+      githubLatestTag(svc, "git-for-windows", "git"),
+      githubLatestTag(svc, "rust-lang", "rust"),
+    ]);
+
+  // Stay on the installed line: LTS users compare against LTS, current users against current.
+  const nodeTarget =
+    node && nodeIndex.lts && semver.major(node) === semver.major(nodeIndex.lts) ? nodeIndex.lts : nodeIndex.current;
+  const tools: ToolInfo[] = [
+    {
+      id: "node",
+      label: "Node.js",
+      installed: node,
+      latest: nodeTarget,
+      outdated: isOutdated(node, nodeTarget),
+      note: nodeIndex.lts ? `LTS ${nodeIndex.lts}` : undefined,
+    },
+    {
+      id: "pnpm",
+      label: "pnpm",
+      installed: pnpm,
+      latest: pnpmLatest,
+      outdated: isOutdated(pnpm, pnpmLatest),
+      updateHint: "pnpm self-update",
+    },
+    {
+      id: "npm",
+      label: "npm",
+      installed: npm,
+      latest: npmLatestVersion,
+      outdated: isOutdated(npm, npmLatestVersion),
+      updateHint: "npm install -g npm@latest",
+    },
+    { id: "git", label: "Git", installed: git, latest: gitLatest, outdated: isOutdated(git, gitLatest) },
+    {
+      id: "rustc",
+      label: "Rust",
+      installed: rustc,
+      latest: rustLatest,
+      outdated: isOutdated(rustc, rustLatest),
+      updateHint: "rustup update stable",
+    },
+    {
+      id: "cargo",
+      label: "Cargo",
+      installed: cargo,
+      latest: rustLatest,
+      outdated: isOutdated(cargo, rustLatest),
+      updateHint: "rustup update stable",
+    },
+  ];
+
+  const [globalsRun, wingetRun] = await Promise.all([
+    pnpm ? svc.io.run("pnpm", ["outdated", "-g", "--format", "json"]) : undefined,
+    svc.io.run("winget", ["upgrade", "--include-unknown", "--disable-interactivity"]),
+  ]);
+  const snapshot: ToolchainSnapshot = {
+    tools,
+    globals: globalsRun ? parsePnpmGlobalOutdated(globalsRun.stdout) : [],
+    winget: wingetRun.code === null ? [] : parseWingetUpgrades(wingetRun.stdout),
+    wingetAvailable: wingetRun.code !== null,
+    updatedAt: new Date().toISOString(),
+  };
+  await writeSnapshot(svc, "toolchain", snapshot);
+  await svc.queryClient.invalidateQueries({ queryKey: ["toolchain"] });
+  return snapshot;
+}
+
+export const readToolchain = async (svc: Services) => (await readSnapshot<ToolchainSnapshot>(svc, "toolchain"))?.data;
