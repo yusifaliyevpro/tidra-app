@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check (types · format · lint · tests · Rust)
+    # Windows needs no webkit system packages for clippy and cargo test, and it's the primary target.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 12.x
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - parallel:
+          - name: Run Checks
+            run: pnpm check
+
+          - name: Audit dependencies
+            # Print every advisory, fail only on high or critical in shipped code.
+            shell: bash
+            run: |
+              pnpm audit --prod || true
+              pnpm audit --prod --audit-level high
+
+  react-doctor:
+    name: React Doctor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: millionco/react-doctor@v2
+        with:
+          comment: false
