@@ -1,0 +1,53 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Tidra",
+  "version": "../package.json",
+  "identifier": "app.tidra.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm web",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm vite:build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Tidra",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 600,
+        "center": true,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "theme": "Dark",
+        "shadow": true,
+        "dragDropEnabled": false,
+        "windowEffects": { "effects": ["mica"] }
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self'; connect-src ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self'; connect-src ipc: http://ipc.localhost ws://localhost:1420 ws://localhost:1421"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "Keep every project you maintain up to date.",
+    "createUpdaterArtifacts": true,
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVDRDY1ODlBRjU2OTRBMEMKUldRTVNtbjFtbGpXWENNa1p4dVNFODliSmRCcDVtOU5oc2w5aEk5dGJEMUU2ZGRrcnN6Wk9RODkK",
+      "endpoints": ["https://github.com/yusifaliyevpro/tidra-app/releases/latest/download/latest.json"]
+    }
+  }
+}
