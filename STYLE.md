@@ -18,8 +18,9 @@ How Tidra code and UI should look. Short version: small, literal, typed, tested,
 ## React
 
 - **React Compiler is on.** Don't write `useMemo`, `useCallback` or `memo` by hand. If the compiler bails out, fix the code (it usually means a rule-of-React violation).
-- Data comes from TanStack Query hooks in `src/modules/<id>/queries.ts`; components don't call `fetch` or `invoke` directly.
-- Keep components small; one component per file when it's exported. Co-locate module-only components under the module.
+- Data comes from TanStack Query hooks (`src/app/queries.ts`) over functions in `src/services`; components don't call `fetch` or `invoke` directly.
+- External stores (`useSyncExternalStore`) return immutable snapshots; never mutate an object a component already rendered.
+- Keep components small: when a component branches a lot, split it into named subcomponents. Shared feature pieces live in `src/modules`, screen-only ones stay in the route file.
 - Effects only for syncing with external systems (subscriptions, IPC channels). Derive everything else during render.
 - Accessibility: every interactive element is reachable by keyboard, has a visible focus ring, and an accessible name.
 
@@ -30,8 +31,18 @@ How Tidra code and UI should look. Short version: small, literal, typed, tested,
 - No gradients, glows, big shadows, emoji, or illustrations. Icons: lucide, 16px, 1.5 stroke.
 - Type: Geist 13px / 20px line height; Geist Mono with tabular numbers for versions, hashes, logs, ports.
 - Motion: 120–150ms opacity/transform, respects `prefers-reduced-motion`.
-- **Copy is short and literal.** Sentence case. Buttons are verbs ("Update 3 packages", "Open in VS Code"). Empty states say exactly what to do next. No marketing language, no exclamation marks, no "Oops".
-- Keyboard first: every list supports j/k, Enter, Space to select, Esc; Ctrl+K opens the palette.
+- **Copy is short and literal.** Sentence case. Buttons are verbs ("Update 3 packages", "Open in VS Code"). No marketing language, no exclamation marks, no "Oops".
+- **No text pollution.** Don't explain what the screen already shows. Empty states are a title ("No workflows"), plus one line only when it tells you what to do. Descriptions under settings are a few words ("Opens in the tray"), not sentences. Prefer no hint over an obvious one.
+- **Not a website.** No hero headers, stat-card dashboards, "Open →" links or cards that only say "all good". Lists and rows, like a native app. When nothing needs attention, say so once ("All clear").
+
+## Native behaviour
+
+- Arrow cursor on every control; the I-beam only in text fields. No pointer hands.
+- Scroll stops dead at the ends (no rubber-band). Text is selectable only in fields, code, logs and `[data-selectable]`.
+- No flashes: the window appears after the first painted frame, spinners wait 250 ms, data the first frame needs is prefetched.
+- Settings use `SettingsGroup` + `SettingRow` (`src/modules/settings/rows.tsx`): label left, control right, hairline dividers, one pane per category. Shortcuts are recorded (`ShortcutInput`), never typed as accelerator strings.
+- Destructive actions confirm in a `Dialog` that says what is and isn't affected.
+- Keyboard first: every list supports j/k, Enter, Space to select, Esc; Ctrl+K opens the palette; `g` + a letter jumps to a screen.
 
 ## Rust
 

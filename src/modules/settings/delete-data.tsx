@@ -24,7 +24,7 @@ export function DeleteAllData() {
   return (
     <SettingRow label="Delete all data" description="Projects, settings and saved tokens on this device">
       <Button size="sm" variant="danger" onClick={() => setConfirming(true)}>
-        Delete…
+        Delete
       </Button>
       <Dialog
         open={confirming}
