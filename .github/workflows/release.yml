@@ -1,16 +1,65 @@
 name: Release
 
+# Bumping "version" in package.json on main releases it: draft release with generated notes, signed builds for
+# every platform, then publish (which creates the v<version> tag). Nothing happens while the version is released.
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths: [package.json]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
+  prepare:
+    name: Check version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      release_id: ${{ steps.draft.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the version
+        id: check
+        run: |
+          VERSION=$(jq -r .version package.json)
+          echo "Version: $VERSION"
+          # The tag only exists once a release is published, so its presence means "already released".
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null; then
+            echo "v$VERSION is already released."
+          else
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Drafts left by a failed run are replaced, so re-running always starts clean.
+      - name: Create draft release
+        id: draft
+        if: steps.check.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          DRAFTS=".[] | select(.draft and .tag_name == \"v$VERSION\") | .id"
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq "$DRAFTS"); do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+          done
+          gh release create "v$VERSION" --draft --target "$GITHUB_SHA" --title "Tidra v$VERSION" --generate-notes
+          ID=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq "$DRAFTS" | head -n1)
+          echo "release_id=$ID" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build (${{ matrix.platform }})
+    needs: prepare
+    if: needs.prepare.outputs.version != ''
     permissions:
       contents: write
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - platform: windows-latest
@@ -53,16 +102,27 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      # Builds signed updater artifacts and uploads them, plus latest.json, to a draft release for the tag.
+      # Uploads signed installers, updater artifacts and latest.json to the draft created above.
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: Tidra ${{ github.ref_name }}
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.prepare.outputs.release_id }}
           uploadUpdaterJson: true
           args: ${{ matrix.args }}
+
+  publish:
+    name: Publish
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Publishing creates the tag; installed apps see the update from here on (drafts are invisible to them).
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false --latest

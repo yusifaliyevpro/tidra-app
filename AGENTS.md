@@ -122,9 +122,13 @@ Open:
 
 - [ ] Full end-to-end run of the real app on throwaway repos: update → checks → commit, revert, push and PR, notifications, tray, hotkey, autostart
 - [ ] Install a signed `pnpm build` and confirm a cold start shows no flash and closing hides to the tray
-- [ ] First tagged release through `release.yml`, then check the in-app updater against it
+- [ ] First release through `release.yml` (bump `package.json`), then check the in-app updater against it
 - [ ] Sync between two devices against a real Turso and Supabase database
 - [ ] README screenshots
+
+## Releasing
+
+Bump `version` in `package.json` and push to `main`; that is the whole release. `release.yml` sees the new version (no `v<version>` tag yet), creates a draft release with GitHub's generated notes, builds and signs Windows, macOS (universal) and Linux, uploads installers and `latest.json`, then publishes the release, which creates the tag. Installed apps only see published releases. A failed run leaves a draft that the next run (or "Run workflow") replaces. `package.json` is the only version: `tauri.conf.json` reads it, and the crate version in `Cargo.toml` is a fixed `0.0.0`.
 
 ## Release signing
 
