@@ -35,7 +35,9 @@ pub struct Processes {
 
 /// Resolves a bare program name through PATH (and PATHEXT on Windows) so `.cmd` shims like `pnpm.cmd` run.
 pub fn resolve_program(program: &str) -> Result<PathBuf, String> {
-    which::which(program).map_err(|_| format!("`{program}` was not found on PATH"))
+    let cwd = std::env::current_dir().map_err(|err| err.to_string())?;
+    which::which_in(program, Some(crate::env_path::path()), cwd)
+        .map_err(|_| format!("`{program}` was not found on PATH"))
 }
 
 /// Length of the longest prefix of `buf` that ends on a UTF-8 character boundary.
@@ -100,6 +102,7 @@ pub async fn proc_spawn(
     if let Some(cwd) = &request.cwd {
         command.current_dir(cwd);
     }
+    command.env("PATH", crate::env_path::path());
     if let Some(env) = &request.env {
         command.envs(env);
     }

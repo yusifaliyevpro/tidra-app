@@ -25,7 +25,10 @@
       "allow": [{ "url": "https://**" }]
     },
     "updater:default",
-    "opener:allow-open-url",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://*" }, { "url": "http://*" }]
+    },
     {
       "identifier": "opener:allow-open-path",
       "allow": [{ "path": "**" }]
