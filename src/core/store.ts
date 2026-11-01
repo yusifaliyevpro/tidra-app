@@ -1,5 +1,5 @@
 import * as z from "@zod/mini";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { HttpCache } from "@/engine/registry";
 import type { Clock } from "@/sync/hlc";
 import type { Db } from "./db/client";
@@ -47,6 +47,12 @@ export function createStore(db: Db, clock: Clock) {
       const row = await db.query.snapshots.findFirst({ where: eq(snapshots.key, key) });
       const data = row?.data;
       return row && z.validate(schema, data) ? { data, updatedAt: row.updatedAt } : undefined;
+    },
+    /** Many snapshots in one query; missing keys are simply absent from the map. */
+    async getSnapshots(keys: string[]): Promise<Map<string, { data: unknown; updatedAt: string }>> {
+      if (keys.length === 0) return new Map();
+      const rows = await db.select().from(snapshots).where(inArray(snapshots.key, keys));
+      return new Map(rows.map((row) => [row.key, { data: row.data, updatedAt: row.updatedAt }]));
     },
     async setSnapshot(key: string, data: unknown) {
       const updatedAt = now();

@@ -13,6 +13,7 @@ import { createRegistryClient, type RegistryClient } from "@/engine/registry";
 import { createGitHub, type GitHub } from "@/integrations/github";
 import { stampSecret, SYNCED_TABLE_META } from "@/sync/engine";
 import { createClock, type Clock } from "@/sync/hlc";
+import { recordRateLimit } from "./github-limit";
 
 export interface Services {
   preview: boolean;
@@ -28,6 +29,8 @@ export interface Services {
   /** Writes a secret to the keychain and marks it for the next sync. */
   setSecret(key: SecretKey, value: string | undefined): Promise<void>;
   jobStates(): JobState[];
+  /** Invalidates query keys on the next frame-ish tick, so a burst of background writes rerenders once. */
+  invalidate(...keys: string[][]): void;
 }
 
 /** Restarts the clock past every HLC on disk so a restart never issues an older timestamp. */
@@ -57,11 +60,21 @@ export async function createServices(options: { io: Io; driver: SqlDriver; previ
   });
 
   const scheduler = createScheduler({
+    // Each job already fans out (git, registry, GitHub); three at once keeps launch smooth.
+    maxConcurrent: 3,
     isVisible: () => document.visibilityState === "visible",
     onChange: () => void queryClient.invalidateQueries({ queryKey: ["jobs"] }),
   });
 
   const registries = new Map<string, RegistryClient>();
+  const pendingKeys = new Map<string, string[]>();
+  let flushTimer: ReturnType<typeof setTimeout> | undefined;
+  const flushInvalidations = () => {
+    flushTimer = undefined;
+    const keys = [...pendingKeys.values()];
+    pendingKeys.clear();
+    for (const queryKey of keys) void queryClient.invalidateQueries({ queryKey });
+  };
 
   return {
     preview,
@@ -82,7 +95,12 @@ export async function createServices(options: { io: Io; driver: SqlDriver; previ
       return client;
     },
     async github() {
-      return createGitHub({ fetch: io.fetch, token: await secrets.get(SECRET_KEYS.github) });
+      return createGitHub({
+        fetch: io.fetch,
+        token: await secrets.get(SECRET_KEYS.github),
+        cache: store.httpCache,
+        onRateLimit: recordRateLimit,
+      });
     },
     async setSecret(key, value) {
       if (value) await secrets.set(key, value);
@@ -91,5 +109,9 @@ export async function createServices(options: { io: Io; driver: SqlDriver; previ
       await queryClient.invalidateQueries({ queryKey: ["secrets"] });
     },
     jobStates: () => scheduler.states(),
+    invalidate(...keys) {
+      for (const key of keys) pendingKeys.set(JSON.stringify(key), key);
+      flushTimer ??= setTimeout(flushInvalidations, 250);
+    },
   };
 }

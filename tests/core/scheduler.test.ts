@@ -93,3 +93,45 @@ describe("scheduler", () => {
     expect(aborted).toBe(true);
   });
 });
+
+describe("scheduler at launch", () => {
+  it("waits for a job's interval when it ran recently in an earlier session", async () => {
+    let time = 1_000_000;
+    const run = vi.fn<() => Promise<undefined>>(async () => undefined);
+    const scheduler = createScheduler({ now: () => time, random: () => 0, tickMs: 60_000 });
+    scheduler.register({ id: "fresh", title: "Fresh", intervalMinutes: 30, run }, time - 10 * 60_000);
+    scheduler.register({ id: "stale", title: "Stale", intervalMinutes: 30, run }, time - 40 * 60_000);
+    scheduler.start();
+    await Promise.resolve();
+    expect(run).toHaveBeenCalledTimes(1);
+    time += 20 * 60_000;
+    scheduler.setPaused(false);
+    await Promise.resolve();
+    expect(run).toHaveBeenCalledTimes(2);
+    scheduler.stop();
+  });
+
+  it("runs at most maxConcurrent jobs at once and starts the next when one finishes", async () => {
+    const releases: (() => void)[] = [];
+    const started: string[] = [];
+    const scheduler = createScheduler({ maxConcurrent: 2, tickMs: 60_000 });
+    for (const id of ["a", "b", "c"]) {
+      scheduler.register({
+        id,
+        title: id,
+        intervalMinutes: 30,
+        run: () =>
+          new Promise<void>((resolve) => {
+            started.push(id);
+            releases.push(resolve);
+          }),
+      });
+    }
+    scheduler.start();
+    expect(started).toEqual(["a", "b"]);
+    releases[0]?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(started).toEqual(["a", "b", "c"]);
+    scheduler.stop();
+  });
+});

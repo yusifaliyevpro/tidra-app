@@ -1,17 +1,18 @@
 import * as z from "@zod/mini";
+import { like } from "drizzle-orm";
+import { notifications } from "@/core/db/schema";
 import { setTrayAttention } from "@/core/native";
 import type { Job } from "@/core/scheduler";
-import { wouldFailCi } from "@/engine/advisories";
 import { scanAllActions } from "./actions";
 import { buildTimeline } from "./changelogs";
 import type { Services } from "./context";
 import { refreshDeploys } from "./deploys";
 import { refreshBotPulls, refreshCi, refreshInbox } from "./github-feed";
-import { dismissedAdvisories, homeSummary, needsAttention, readCiThreshold } from "./home";
+import { dismissedAdvisories, homeSummary, needsAttention } from "./home";
 import { notify } from "./notify";
 import { refreshPackages } from "./packages";
 import { readAllReports, refreshAllProjects } from "./projects";
-import { readSecurity, scanAllProjects } from "./security";
+import { readAllSecurity, scanAllProjects } from "./security";
 import { writeSnapshot } from "./snapshot";
 import { runSync } from "./sync";
 import { refreshToolchain } from "./toolchain";
@@ -26,58 +27,90 @@ export interface JobDefinition {
   run(svc: Services, signal: AbortSignal): Promise<void>;
 }
 
-async function notifySecurity(svc: Services) {
-  const [threshold, dismissed, projects] = await Promise.all([
-    readCiThreshold(svc),
+const RECENT_MS = 2 * 86_400_000;
+
+const SEEN_ADVISORIES = "seenAdvisories";
+
+/**
+ * Only advisories that appeared since the last scan notify, grouped per project, and only high or critical ones.
+ * The first scan just records what is already there, so opening the app never floods the list.
+ */
+export async function notifySecurity(svc: Services) {
+  const [dismissed, projects, seenList] = await Promise.all([
     dismissedAdvisories(svc),
     svc.store.listProjects(),
+    svc.store.getLocal(SEEN_ADVISORIES, z.nullable(z.array(z.string())), null),
   ]);
-  const reports = await Promise.all(projects.map((project) => readSecurity(svc, project.id)));
-  const alerts = projects.flatMap((project, i) =>
-    (reports[i]?.findings ?? [])
-      .filter((f) => !dismissed.has(f.id) && wouldFailCi([f], threshold))
-      .map((finding) => ({
-        key: `${project.id}:${finding.id}`,
-        title: `${project.name}: ${finding.severity} advisory in ${finding.name}`,
-        body: finding.fixedIn ? `${finding.summary}. Fixed in ${finding.fixedIn}.` : finding.summary,
-        route: "/security",
-      })),
+  const reports = await readAllSecurity(
+    svc,
+    projects.map((p) => p.id),
   );
-  await Promise.all(alerts.map((alert) => notify(svc, "advisory", alert)));
+  const current = projects.flatMap((project, i) =>
+    (reports[i]?.findings ?? []).map((finding) => ({ project, finding, key: `${project.id}:${finding.id}` })),
+  );
+  await svc.store.setLocal(SEEN_ADVISORIES, [...new Set(current.map((c) => c.key))]);
+  if (seenList === null) {
+    await clearAdvisoryBacklog(svc);
+    return;
+  }
+  const seen = new Set(seenList);
+  const fresh = current.filter(
+    ({ finding, key }) =>
+      !seen.has(key) && !dismissed.has(finding.id) && (finding.severity === "high" || finding.severity === "critical"),
+  );
+  await Promise.all(
+    [...Map.groupBy(fresh, (item) => item.project.id)].map(([projectId, items]) => {
+      const name = items[0]?.project.name ?? "A project";
+      const packages = [...new Set(items.map((i) => i.finding.name))];
+      return notify(svc, "advisory", {
+        key: `${projectId}:${items
+          .map((i) => i.finding.id)
+          .toSorted()
+          .join(",")}`,
+        title: `${name}: ${items.length} new ${items.length === 1 ? "advisory" : "advisories"}`,
+        body: packages.length <= 3 ? `In ${packages.join(", ")}` : `In ${packages.slice(0, 3).join(", ")} and more`,
+        route: "/security",
+        delivery: "urgent",
+      });
+    }),
+  );
+}
+
+/** Older versions recorded one notification per advisory; those are noise, not news. */
+async function clearAdvisoryBacklog(svc: Services) {
+  await svc.store.db.delete(notifications).where(like(notifications.key, "advisory:%"));
+  svc.invalidate(["notifications"]);
 }
 
 async function refreshTimeline(svc: Services) {
-  const byName = new Map<string, Set<string>>();
+  const usage = new Map<string, string[]>();
   for (const { project, report } of await readAllReports(svc)) {
-    for (const dep of report?.dependencies ?? []) {
-      if (dep.field === "dependencies") byName.set(dep.name, (byName.get(dep.name) ?? new Set()).add(project.name));
-    }
+    for (const dep of report?.dependencies ?? []) usage.set(dep.name, [...(usage.get(dep.name) ?? []), project.name]);
   }
-  const timeline = await buildTimeline(
-    svc,
-    [...byName].map(([name, projects]) => ({ name, projects: [...projects] })),
-  );
-  await writeSnapshot(svc, "timeline", timeline);
+  const timeline = await buildTimeline(svc, usage);
+  await writeSnapshot(svc, "watched-releases", timeline);
   await svc.queryClient.invalidateQueries({ queryKey: ["timeline"] });
   await Promise.all(
     timeline.items
-      .filter((item) => item.major && item.usedBy.length > 0)
+      .filter((item) => item.major && Date.now() - Date.parse(item.publishedAt) < RECENT_MS)
       .map((item) =>
         notify(svc, "major", {
           key: `${item.repo}@${item.tag}`,
           title: `${item.packageName ?? item.repo} ${item.tag} is out`,
-          body: `Major release. Used by ${item.usedBy.join(", ")}.`,
+          body: item.usedBy.length > 0 ? `Major release. Used by ${item.usedBy.join(", ")}.` : "Major release.",
           route: "/changelogs",
         }),
       ),
   );
 }
 
+/** Only fresh failures on the default branch; older ones were already there before Tidra looked. */
 async function refreshCiAndNotify(svc: Services) {
   const snapshot = await refreshCi(svc);
   const failed = snapshot.entries.flatMap((entry) => {
-    const run = entry.runs.find((r) => r.status === "completed");
-    return run?.conclusion === "failure" ? [{ entry, run }] : [];
+    const run = entry.runs.find((r) => r.status === "completed" && r.head_branch === entry.defaultBranch);
+    const fresh = run && Date.now() - Date.parse(run.created_at) < RECENT_MS;
+    return fresh && run.conclusion === "failure" ? [{ entry, run }] : [];
   });
   await Promise.all(
     failed.map(({ entry, run }) =>
@@ -95,7 +128,7 @@ async function refreshDeploysAndNotify(svc: Services) {
   const snapshot = await refreshDeploys(svc);
   await Promise.all(
     snapshot.deployments
-      .filter((deploy) => deploy.state === "error")
+      .filter((deploy) => deploy.state === "error" && Date.now() - Date.parse(deploy.createdAt) < RECENT_MS)
       .map((deploy) =>
         notify(svc, "deploy", {
           key: `${deploy.provider}:${deploy.id}`,
@@ -154,9 +187,33 @@ async function updateTray(svc: Services) {
   await svc.queryClient.invalidateQueries({ queryKey: ["home"] });
 }
 
+const LAST_RUNS = "jobLastRuns";
+const LastRunsSchema = z.record(z.string(), z.number());
+
+/** Order is priority at launch: what the first screens show runs first, slow tool probes run last. */
+const PRIORITY = [
+  "projects",
+  "inbox",
+  "ci",
+  "security",
+  "actions",
+  "bot-pulls",
+  "deploys",
+  "timeline",
+  "sync",
+  "packages",
+  "toolchain",
+];
+
 export async function registerJobs(svc: Services): Promise<void> {
-  const intervals = await readJobIntervals(svc);
-  for (const definition of JOBS) {
+  const [intervals, lastRuns] = await Promise.all([
+    readJobIntervals(svc),
+    svc.store.getLocal(LAST_RUNS, LastRunsSchema, {}),
+  ]);
+  // One map for every job, so two jobs finishing together never overwrite each other's time.
+  const runs = new Map(Object.entries(lastRuns));
+  const ordered = JOBS.toSorted((a, b) => PRIORITY.indexOf(a.id) - PRIORITY.indexOf(b.id));
+  for (const definition of ordered) {
     const job: Job = {
       id: definition.id,
       title: definition.title,
@@ -164,9 +221,12 @@ export async function registerJobs(svc: Services): Promise<void> {
       visibleOnly: definition.visibleOnly,
       run: async (signal) => {
         await definition.run(svc, signal);
+        // Only successful runs count, so a failed check is retried on the next launch.
+        runs.set(definition.id, Date.now());
+        await svc.store.setLocal(LAST_RUNS, Object.fromEntries(runs));
         await updateTray(svc);
       },
     };
-    svc.scheduler.register(job);
+    svc.scheduler.register(job, lastRuns[definition.id]);
   }
 }

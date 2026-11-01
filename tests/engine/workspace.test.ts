@@ -117,3 +117,42 @@ describe("loadWorkspace", () => {
     await expect(loadWorkspace(memoryIo({}), "/empty")).rejects.toThrow("No readable package.json");
   });
 });
+
+describe("workspace fingerprint", () => {
+  const files = {
+    "/r/package.json": pkg({ name: "r", dependencies: { a: "^1.0.0" } }),
+    "/r/package-lock.json": JSON.stringify({
+      lockfileVersion: 3,
+      packages: { "node_modules/a": { version: "1.0.0" } },
+    }),
+  };
+
+  it("stays the same while no input file changes", async () => {
+    const first = await loadWorkspace(memoryIo(files), "/r");
+    const second = await loadWorkspace(memoryIo(files), "/r");
+    expect(second.fingerprint).toBe(first.fingerprint);
+    expect(second.lockfileHash).toBe(first.lockfileHash);
+  });
+
+  it("changes with the lockfile and with any manifest", async () => {
+    const base = await loadWorkspace(memoryIo(files), "/r");
+    const lock = await loadWorkspace(
+      memoryIo({
+        ...files,
+        "/r/package-lock.json": JSON.stringify({
+          lockfileVersion: 3,
+          packages: { "node_modules/a": { version: "1.0.1" } },
+        }),
+      }),
+      "/r",
+    );
+    const manifest = await loadWorkspace(
+      memoryIo({ ...files, "/r/package.json": pkg({ name: "r", dependencies: { a: "^1.0.1" } }) }),
+      "/r",
+    );
+    expect(lock.fingerprint).not.toBe(base.fingerprint);
+    expect(lock.lockfileHash).not.toBe(base.lockfileHash);
+    expect(manifest.fingerprint).not.toBe(base.fingerprint);
+    expect(manifest.lockfileHash).toBe(base.lockfileHash);
+  });
+});

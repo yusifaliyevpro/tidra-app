@@ -1,14 +1,14 @@
 import { ulid } from "ulid";
 import type { ProjectWithPath } from "@/core/store";
 import { findProjects, findRepoRoot } from "@/engine/discover";
-import { createGit, normalizeRemote, type BranchInfo, type GitStatus } from "@/engine/git";
+import { createGit, normalizeRemote, type BranchInfo, type ForkInfo, type GitStatus } from "@/engine/git";
 import { createLimit } from "@/engine/limit";
 import { computeOutdated, DEFAULT_MAJOR_PINS, type OutdatedEntry } from "@/engine/outdated";
 import { basename, join, normalize, relative } from "@/engine/path";
 import { checksFromLines, detectChecks, display } from "@/engine/pm";
 import { loadWorkspace, type PackageManager, type Workspace } from "@/engine/workspace";
 import type { Services } from "./context";
-import { readSnapshot, writeSnapshot } from "./snapshot";
+import { readSnapshot, readSnapshots, writeSnapshot } from "./snapshot";
 
 export interface ProjectReport {
   projectId: string;
@@ -20,11 +20,19 @@ export interface ProjectReport {
   registryErrors: { name: string; message: string }[];
   git?: GitStatus;
   branches: BranchInfo[];
+  fork?: ForkInfo;
   /** Direct dependency names across every importer, used by search and security. */
   dependencies: { name: string; spec: string; importer: string; field: string }[];
   error?: string;
+  /** Workspace fingerprint the outdated list was computed from. */
+  fingerprint?: string;
+  /** When the registry was last asked; reused while the fingerprint matches and this is recent. */
+  checkedAt?: string;
   updatedAt: string;
 }
+
+/** Unchanged files reuse the last registry answers this long; "Check again" always asks. */
+const REUSE_MS = 2 * 3_600_000;
 
 export const reportKey = (projectId: string) => `report:${projectId}`;
 
@@ -75,7 +83,31 @@ export function projectChecks(project: ProjectWithPath, workspace: Workspace) {
     : detectChecks(workspace.pm, workspace.importers[0]?.manifest ?? {});
 }
 
-export async function buildReport(svc: Services, project: ProjectWithPath): Promise<ProjectReport> {
+type GitInfo = [GitStatus | undefined, BranchInfo[], ForkInfo | undefined];
+
+/** Git state belongs to the checkout, so packages of one repo share a single set of git calls. */
+export type GitInfoCache = Map<string, Promise<GitInfo>>;
+
+function readGitInfo(svc: Services, project: ProjectWithPath & { path: string }, cache?: GitInfoCache) {
+  const root = project.subdir ? project.path.slice(0, -(project.subdir.length + 1)) : project.path;
+  const hit = cache?.get(root);
+  if (hit) return hit;
+  const git = createGit(svc.io, root);
+  const info = Promise.all([
+    git.status().catch(() => undefined),
+    git.branches().catch(() => []),
+    git.fork().catch(() => undefined),
+  ]);
+  cache?.set(root, info);
+  return info;
+}
+
+export async function buildReport(
+  svc: Services,
+  project: ProjectWithPath,
+  previous?: ProjectReport,
+  gitCache?: GitInfoCache,
+): Promise<ProjectReport> {
   const base = { projectId: project.id, updatedAt: new Date().toISOString() };
   if (!project.path) {
     return {
@@ -91,18 +123,24 @@ export async function buildReport(svc: Services, project: ProjectWithPath): Prom
       error: "This project has no folder on this device yet.",
     };
   }
-  const git = createGit(svc.io, project.path);
-  const [gitStatus, branches] = await Promise.all([
-    git.status().catch(() => undefined),
-    git.branches().catch(() => []),
-  ]);
+  const [gitStatus, branches, fork] = await readGitInfo(svc, { ...project, path: project.path }, gitCache);
   try {
     const workspace = await loadWorkspace(svc.io, project.path);
-    const { entries, errors } = await computeOutdated(workspace, svc.registry(workspace.npm), {
-      majorPins: project.majorPins ?? DEFAULT_MAJOR_PINS,
-    });
+    const reuse =
+      previous &&
+      !previous.error &&
+      previous.fingerprint === workspace.fingerprint &&
+      previous.checkedAt &&
+      Date.parse(base.updatedAt) - Date.parse(previous.checkedAt) < REUSE_MS;
+    const { entries, errors } = reuse
+      ? { entries: previous.outdated, errors: previous.registryErrors }
+      : await computeOutdated(workspace, svc.registry(workspace.npm), {
+          majorPins: project.majorPins ?? DEFAULT_MAJOR_PINS,
+        });
     return {
       ...base,
+      fingerprint: workspace.fingerprint,
+      checkedAt: reuse ? previous.checkedAt : base.updatedAt,
       pm: workspace.pm,
       importers: workspace.importers.map((i) => ({ path: i.path, name: i.manifest.name })),
       scripts: workspace.importers[0]?.manifest.scripts ?? {},
@@ -111,6 +149,7 @@ export async function buildReport(svc: Services, project: ProjectWithPath): Prom
       registryErrors: errors,
       git: gitStatus,
       branches,
+      fork,
       dependencies: workspace.importers.flatMap((importer) =>
         (["dependencies", "devDependencies", "optionalDependencies"] as const).flatMap((field) =>
           Object.entries(importer.manifest[field] ?? {}).map(([name, spec]) => ({
@@ -133,33 +172,69 @@ export async function buildReport(svc: Services, project: ProjectWithPath): Prom
       registryErrors: [],
       git: gitStatus,
       branches,
+      fork,
       dependencies: [],
       error: error instanceof Error ? error.message : String(error),
     };
   }
 }
 
-export async function refreshProject(svc: Services, projectId: string): Promise<ProjectReport | undefined> {
+/** `force` skips the fingerprint shortcut and asks the registry again. */
+export async function refreshProject(
+  svc: Services,
+  projectId: string,
+  options: { force?: boolean; gitCache?: GitInfoCache } = {},
+): Promise<ProjectReport | undefined> {
   const project = await svc.store.getProject(projectId);
   if (!project) return undefined;
-  const report = await buildReport(svc, project);
+  const previous = options.force ? undefined : await readReport(svc, projectId);
+  const report = await buildReport(svc, project, previous, options.gitCache);
   await writeSnapshot(svc, reportKey(projectId), report);
-  await svc.queryClient.invalidateQueries({ queryKey: ["report", projectId] });
-  await svc.queryClient.invalidateQueries({ queryKey: ["reports"] });
-  await svc.queryClient.invalidateQueries({ queryKey: ["home"] });
+  svc.invalidate(["report", projectId], ["reports"], ["home"], ["palette"]);
   return report;
 }
 
 /** A few projects at a time: each one already fans out registry requests through the shared limiter. */
 export async function refreshAllProjects(svc: Services, signal?: AbortSignal): Promise<void> {
-  const limit = createLimit(3);
+  const limit = createLimit(4);
   const projects = await svc.store.listProjects();
+  await fetchCheckouts(svc, projects, signal);
+  const gitCache: GitInfoCache = new Map();
   await Promise.all(
-    projects.map((project) => limit(async () => (signal?.aborted ? undefined : refreshProject(svc, project.id)))),
+    projects.map((project) =>
+      limit(async () => (signal?.aborted ? undefined : refreshProject(svc, project.id, { gitCache }))),
+    ),
+  );
+}
+
+const FETCH_TIMEOUT_MS = 20_000;
+
+/** Keeps ahead/behind counts (and the Sync button) current; one quiet fetch per checkout, failures ignored. */
+async function fetchCheckouts(svc: Services, projects: ProjectWithPath[], signal?: AbortSignal) {
+  const roots = new Set(
+    projects.flatMap((p) => (p.path && p.remote ? [p.subdir ? p.path.slice(0, -(p.subdir.length + 1)) : p.path] : [])),
+  );
+  const limit = createLimit(4);
+  await Promise.all(
+    [...roots].map((root) =>
+      limit(async () => {
+        if (signal?.aborted) return;
+        const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+        await createGit(svc.io, root)
+          .raw(["fetch", "--all", "--prune", "--quiet"], {
+            signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+          })
+          .catch(() => undefined);
+      }),
+    ),
   );
 }
 
 export async function readAllReports(svc: Services): Promise<{ project: ProjectWithPath; report?: ProjectReport }[]> {
   const projects = await svc.store.listProjects();
-  return Promise.all(projects.map(async (project) => ({ project, report: await readReport(svc, project.id) })));
+  const reports = await readSnapshots<ProjectReport>(
+    svc,
+    projects.map((p) => reportKey(p.id)),
+  );
+  return projects.map((project, i) => ({ project, report: reports[i] }));
 }

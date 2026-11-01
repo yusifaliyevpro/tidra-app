@@ -35,6 +35,21 @@ export function installNativeFeel() {
   });
 }
 
+/** Background promise failures surface once as a toast instead of disappearing into the console. */
+export function reportUnhandledErrors(show: (message: string) => void) {
+  let last = "";
+  let lastAt = 0;
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason: unknown = event.reason;
+    console.error(reason);
+    const message = reason instanceof Error ? reason.message : String(reason);
+    if (message === last && Date.now() - lastAt < 10_000) return;
+    last = message;
+    lastAt = Date.now();
+    show(message);
+  });
+}
+
 /** Shows the window after the first frame with final fonts, so it never opens blank or reflows. */
 export async function revealWindow() {
   await document.fonts.ready;

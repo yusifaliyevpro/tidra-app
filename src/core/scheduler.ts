@@ -25,6 +25,8 @@ export interface SchedulerOptions {
   jitter?: number;
   random?: () => number;
   onChange?: (states: JobState[]) => void;
+  /** Most jobs running at once from the timer; the rest wait their turn in registration order. */
+  maxConcurrent?: number;
 }
 
 const MAX_BACKOFF = 4;
@@ -69,24 +71,34 @@ export function createScheduler(options: SchedulerOptions = {}) {
     }
   };
 
+  const maxConcurrent = options.maxConcurrent ?? Number.POSITIVE_INFINITY;
   const tick = () => {
     if (paused) return;
     const visible = options.isVisible?.() ?? true;
+    let running = [...states.values()].filter((s) => s.running).length;
     for (const job of jobs.values()) {
+      if (running >= maxConcurrent) return;
       const state = states.get(job.id);
-      if (state && !state.running && state.nextRun <= now() && (visible || !job.visibleOnly)) void execute(job);
+      if (state && !state.running && state.nextRun <= now() && (visible || !job.visibleOnly)) {
+        running++;
+        // A finished job frees a slot; check right away instead of waiting for the next tick.
+        void execute(job).then(tick);
+      }
     }
   };
 
   return {
-    register(job: Job, runSoon = true) {
+    /** `lastRun` from a previous session keeps a relaunch from redoing work that is still fresh. */
+    register(job: Job, lastRun?: number) {
       jobs.set(job.id, job);
       states.set(job.id, {
         id: job.id,
         title: job.title,
         running: false,
         failures: 0,
-        nextRun: runSoon ? now() : now() + delayFor(job, 0),
+        lastRun,
+        nextRun:
+          lastRun === undefined ? now() : Math.min(lastRun + job.intervalMinutes * 60_000, now() + delayFor(job, 0)),
       });
       emit();
     },

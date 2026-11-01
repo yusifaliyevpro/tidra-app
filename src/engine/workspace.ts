@@ -1,5 +1,6 @@
 import * as z from "@zod/mini";
 import { parse as parseYaml } from "yaml";
+import { createHashCache, fingerprint, sha256 } from "./fingerprint";
 import type { Io } from "./io";
 import { EMPTY_LOCKFILE, LOCKFILE_PARSERS, type Lockfile } from "./lockfile";
 import { emptyConfig, parseNpmrc, type NpmConfig } from "./npmrc";
@@ -76,7 +77,14 @@ export interface Workspace {
   saveExact: boolean;
   npm: NpmConfig;
   lockfile: Lockfile;
+  /** SHA-256 over every manifest, the workspace file, npm config and lockfile: unchanged means same results. */
+  fingerprint: string;
+  /** SHA-256 of the lockfile alone; what security scans depend on. */
+  lockfileHash: string;
 }
+
+/** Parsing a big lockfile is the slowest part of loading; the same bytes never parse twice. */
+const parsedLockfiles = createHashCache<Lockfile>(48);
 
 const LOCKFILES: [string, PackageManagerName][] = [
   ["bun.lock", "bun"],
@@ -232,14 +240,22 @@ export async function loadWorkspace(io: Io, rootPath: string): Promise<Workspace
   if (yaml.catalog) catalogs.default = yaml.catalog;
 
   let lockfile = EMPTY_LOCKFILE;
+  let lockfileText: string | null = null;
+  let lockfileHash = "";
   if (pm.lockfile) {
     const parser = LOCKFILE_PARSERS[pm.lockfile.slice(pm.lockfile.lastIndexOf("/") + 1)];
-    const text = parser ? await io.readText(pm.lockfile) : null;
-    if (parser && text !== null) {
-      try {
-        lockfile = parser(text);
-      } catch {
-        lockfile = EMPTY_LOCKFILE;
+    lockfileText = parser ? await io.readText(pm.lockfile) : null;
+    if (parser && lockfileText !== null) {
+      lockfileHash = await sha256(lockfileText);
+      const hit = parsedLockfiles.get(`${pm.lockfile}:${lockfileHash}`);
+      if (hit) lockfile = hit;
+      else {
+        try {
+          lockfile = parser(lockfileText);
+        } catch {
+          lockfile = EMPTY_LOCKFILE;
+        }
+        parsedLockfiles.set(`${pm.lockfile}:${lockfileHash}`, lockfile);
       }
     }
     // A lockfile above the project root (monorepo checkout) keys importers relative to its own folder.
@@ -255,6 +271,14 @@ export async function loadWorkspace(io: Io, rootPath: string): Promise<Workspace
     }
   }
 
+  const hash = await fingerprint([
+    ...importers.flatMap((i) => [i.path, i.manifestText]),
+    yamlText,
+    JSON.stringify(npm),
+    JSON.stringify(pm),
+    lockfileText,
+  ]);
+
   return {
     root,
     pm,
@@ -266,5 +290,7 @@ export async function loadWorkspace(io: Io, rootPath: string): Promise<Workspace
     saveExact: yaml.saveExact === true || npm.values["save-exact"] === "true",
     npm,
     lockfile,
+    fingerprint: hash,
+    lockfileHash,
   };
 }

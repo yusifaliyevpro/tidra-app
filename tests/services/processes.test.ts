@@ -37,3 +37,17 @@ describe("process manager", () => {
     close();
   });
 });
+
+describe("process manager failures", () => {
+  it("marks a script that cannot start as stopped and shows why", async () => {
+    const io = memoryIo({}, { run: () => Promise.reject(new Error("pnpm was not found on PATH")) });
+    const { svc, close } = await testServices(io);
+    const processes = createProcessManager(svc);
+    processes.start({ label: "dev", command: { program: "pnpm", args: ["dev"] } });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const [proc] = processes.snapshot();
+    close();
+    expect(proc?.running).toBe(false);
+    expect(proc?.output).toContain("pnpm was not found on PATH");
+  });
+});

@@ -12,6 +12,16 @@ export async function readSnapshot<T>(svc: Services, key: string): Promise<{ dat
   return svc.store.getSnapshot(`v${VERSION}:${key}`, z.custom<T>(isObject));
 }
 
+/** Several snapshots in one query, in the order of `keys`. */
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- T names the shape this app wrote under the keys
+export async function readSnapshots<T>(svc: Services, keys: string[]): Promise<(T | undefined)[]> {
+  const rows = await svc.store.getSnapshots(keys.map((key) => `v${VERSION}:${key}`));
+  return keys.map((key) => {
+    const data = rows.get(`v${VERSION}:${key}`)?.data;
+    return z.validate(z.custom<T>(isObject), data) ? data : undefined;
+  });
+}
+
 export async function writeSnapshot(svc: Services, key: string, data: object): Promise<void> {
   await svc.store.setSnapshot(`v${VERSION}:${key}`, data);
 }

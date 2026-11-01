@@ -69,12 +69,21 @@ export function createProcessManager(svc: Services) {
             notifySoon();
           },
         })
-        .then((result) => {
-          proc.running = false;
-          proc.exitCode = result.code;
-          if (result.code === null && result.stderr) proc.output += `\n${result.stderr}\n`;
-          notify();
-        });
+        .then(
+          (result) => {
+            proc.running = false;
+            proc.exitCode = result.code;
+            if (result.code === null && result.stderr) proc.output += `\n${result.stderr}\n`;
+            notify();
+          },
+          (error: unknown) => {
+            // A program that cannot start must not look like it is still running.
+            proc.running = false;
+            proc.exitCode = null;
+            proc.output += `\n${error instanceof Error ? error.message : String(error)}\n`;
+            notify();
+          },
+        );
       return id;
     },
     stop(id: string) {

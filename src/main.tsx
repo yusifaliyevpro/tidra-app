@@ -8,15 +8,16 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { applyAppearance, startDesktopIntegration } from "@/app/desktop";
 import { Frame } from "@/app/frame";
-import { installNativeFeel, revealWindow } from "@/app/native-feel";
+import { installNativeFeel, reportUnhandledErrors, revealWindow } from "@/app/native-feel";
 import { RouteError } from "@/app/route-error";
 import { ServicesProvider, type AppContext } from "@/app/services";
 import { StartupError } from "@/app/startup-error";
 import { appEnv, createTauriIo, inTauri, tauriSqlDriver } from "@/core/native";
 import { createServices } from "@/services/context";
+import { homeSummary } from "@/services/home";
 import { registerJobs } from "@/services/jobs";
 import { createProcessManager } from "@/services/processes";
-import { toastError } from "@/ui/toast";
+import { toast, toastError } from "@/ui/toast";
 import { routeTree } from "./routeTree.gen";
 
 const router = createRouter({
@@ -51,6 +52,7 @@ const root = document.getElementById("root");
 if (!root) throw new Error("Missing #root element");
 const reactRoot = createRoot(root);
 if (inTauri) installNativeFeel();
+reportUnhandledErrors((message) => toast(message, "error"));
 
 try {
   const app = await boot();
@@ -62,6 +64,11 @@ try {
     queryKey: ["onboarded"],
     queryFn: () => app.svc.store.getLocal("onboarded", z.boolean(), false),
   });
+  // The overview and sidebar counts read only local snapshots; having them ready means no spinner on launch.
+  await Promise.race([
+    app.svc.queryClient.prefetchQuery({ queryKey: ["home"], queryFn: () => homeSummary(app.svc) }),
+    new Promise((resolve) => setTimeout(resolve, 1500)),
+  ]);
 
   reactRoot.render(
     <StrictMode>

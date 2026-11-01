@@ -14,15 +14,20 @@ import { createLimit } from "@/engine/limit";
 import { fetchWithRetry } from "@/engine/registry";
 import { loadWorkspace } from "@/engine/workspace";
 import type { Services } from "./context";
-import { cached, HOUR, readSnapshot, writeSnapshot } from "./snapshot";
+import { cached, HOUR, readSnapshot, readSnapshots, writeSnapshot } from "./snapshot";
 
 export interface SecurityReport {
   projectId: string;
   findings: Finding[];
   scanned: number;
   error?: string;
+  /** Lockfile hash the findings belong to; an unchanged lockfile skips OSV for a while. */
+  lockfileHash?: string;
   updatedAt: string;
 }
+
+/** Advisory databases change slowly; an unchanged lockfile is re-queried at most this often. */
+const RESCAN_MS = 12 * HOUR;
 
 export const securityKey = (projectId: string) => `security:${projectId}`;
 
@@ -35,12 +40,26 @@ async function vulnDetails(svc: Services, id: string): Promise<OsvVuln | undefin
   return hit.vuln;
 }
 
-export async function scanProject(svc: Services, projectId: string): Promise<SecurityReport> {
+export async function scanProject(
+  svc: Services,
+  projectId: string,
+  options: { force?: boolean } = {},
+): Promise<SecurityReport> {
   const project = await svc.store.getProject(projectId);
   const updatedAt = new Date().toISOString();
   if (!project?.path) return { projectId, findings: [], scanned: 0, error: "No folder on this device.", updatedAt };
   try {
     const workspace = await loadWorkspace(svc.io, project.path);
+    const previous = options.force ? undefined : await readSecurity(svc, projectId);
+    if (
+      previous &&
+      !previous.error &&
+      workspace.lockfileHash &&
+      previous.lockfileHash === workspace.lockfileHash &&
+      Date.parse(updatedAt) - Date.parse(previous.updatedAt) < RESCAN_MS
+    ) {
+      return previous;
+    }
     const packages = workspace.lockfile.packages;
     const direct = new Set(
       workspace.importers.flatMap((i) => [
@@ -72,7 +91,13 @@ export async function scanProject(svc: Services, projectId: string): Promise<Sec
       }
     }
     const unique = new Map(findings.map((f) => [`${f.id}:${f.name}@${f.version}`, f]));
-    const report = { projectId, findings: [...unique.values()], scanned: packages.length, updatedAt };
+    const report = {
+      projectId,
+      findings: [...unique.values()],
+      scanned: packages.length,
+      lockfileHash: workspace.lockfileHash,
+      updatedAt,
+    };
     await writeSnapshot(svc, securityKey(projectId), report);
     return report;
   } catch (error) {
@@ -92,10 +117,12 @@ export async function readSecurity(svc: Services, projectId: string) {
   return (await readSnapshot<SecurityReport>(svc, securityKey(projectId)))?.data;
 }
 
+export const readAllSecurity = (svc: Services, projectIds: string[]) =>
+  readSnapshots<SecurityReport>(svc, projectIds.map(securityKey));
+
 export async function scanAllProjects(svc: Services, signal?: AbortSignal): Promise<void> {
-  for (const project of await svc.store.listProjects()) {
-    if (signal?.aborted) return;
-    await scanProject(svc, project.id);
-  }
+  const limit = createLimit(3);
+  const projects = await svc.store.listProjects();
+  await Promise.all(projects.map((p) => limit(async () => (signal?.aborted ? undefined : scanProject(svc, p.id)))));
   await svc.queryClient.invalidateQueries({ queryKey: ["security"] });
 }
