@@ -1,14 +1,14 @@
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ArrowRight, ChevronRight, ExternalLink, Workflow } from "lucide-react";
+import { ArrowRight, ChevronRight, ClipboardCopy, ExternalLink, Workflow } from "lucide-react";
 import { useState } from "react";
 import { useActions } from "@/app/queries";
 import { useServices } from "@/app/services";
 import { JobRefresh } from "@/modules/common";
 import { BranchActions } from "@/modules/projects/branch-actions";
 import { SyncButton } from "@/modules/projects/sync-button";
-import { applyActionUpdatesToRepo, type ActionItem } from "@/services/actions";
+import { actionsUpdatePrompt, applyActionUpdatesToRepo, type ActionItem } from "@/services/actions";
 import type { RepoGroup } from "@/services/repos";
 import { Button, IconButton } from "@/ui/button";
 import { ErrorBoundary } from "@/ui/error-boundary";
@@ -67,7 +67,7 @@ function RepoActions({ row, outdated }: { row: Row; outdated: ActionItem[] }) {
   const { repo, report } = row;
   const apply = useMutation({
     mutationFn: (items: ActionItem[]) => applyActionUpdatesToRepo(svc, repo.key, items),
-    onSuccess: (message) => toast(`Committed: ${message}`),
+    onSuccess: ({ message, branch }) => toast(`Committed on ${branch}: ${message}`),
     onError: toastError,
   });
   const items = report?.items ?? [];
@@ -94,6 +94,7 @@ function RepoActions({ row, outdated }: { row: Row; outdated: ActionItem[] }) {
           </span>
         </button>
         <RepoPush repo={repo} />
+        {outdated.length > 0 ? <CopyPrompt repo={repo} items={items} /> : null}
         {outdated.length > 0 ? (
           <Button
             size="sm"
@@ -183,5 +184,22 @@ function ActionRow({
         ) : null}
       </span>
     </div>
+  );
+}
+
+/** For updates that may need code or settings changes: hand the whole job to a coding agent. */
+function CopyPrompt({ repo, items }: { repo: RepoGroup; items: ActionItem[] }) {
+  const copy = () =>
+    navigator.clipboard
+      .writeText(actionsUpdatePrompt(repo, items))
+      .then(() => toast("Prompt copied. Paste it into your coding agent."))
+      .catch(toastError);
+  return (
+    <IconButton
+      size="sm"
+      label="Copy a prompt for your coding agent"
+      icon={<ClipboardCopy className="size-3.5" />}
+      onClick={() => void copy()}
+    />
   );
 }

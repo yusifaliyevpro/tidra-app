@@ -4,8 +4,11 @@ import { createGit } from "@/engine/git";
 import { createLimit } from "@/engine/limit";
 import { join } from "@/engine/path";
 import type { Services } from "./context";
+import { refreshProject } from "./projects";
+import { ACTIONS_BRANCH_PREFIX } from "./pull-requests";
 import { listRepos, type RepoGroup } from "./repos";
 import { cached, HOUR, readSnapshot, readSnapshots, writeSnapshot } from "./snapshot";
+import { branchName } from "./updates";
 
 export interface ActionItem extends ActionUse {
   file: string;
@@ -100,36 +103,71 @@ export async function readAllActions(svc: Services) {
   return repos.map((repo, i) => ({ repo, report: reports[i] }));
 }
 
-/** Rewrites the selected refs and commits only the workflow files on the current branch. */
-export async function applyActionUpdatesToRepo(svc: Services, repoKey: string, items: ActionItem[]): Promise<string> {
+/**
+ * Rewrites the selected refs on a `tidra/actions-<date>` branch cut from the default branch (or keeps adding to the
+ * Actions branch already checked out) and commits only the workflow files. Uncommitted work elsewhere is carried
+ * along untouched. Returns the commit message and branch for the toast.
+ */
+export async function applyActionUpdatesToRepo(
+  svc: Services,
+  repoKey: string,
+  items: ActionItem[],
+): Promise<{ message: string; branch: string }> {
   const repo = (await listRepos(svc)).find((r) => r.key === repoKey);
   if (!repo?.root) throw new Error("This repository has no folder on this device.");
-  const byFile = Map.groupBy(
-    items.filter((i) => i.next),
-    (i) => i.file,
-  );
   const root = repo.root;
+  const git = createGit(svc.io, root);
+  const status = await git.status();
+  let branch = status.branch;
+  let created: { name: string; from: string | undefined } | undefined;
+  if (!branch?.startsWith(ACTIONS_BRANCH_PREFIX)) {
+    const base = (await git.defaultBranch()) ?? branch;
+    const name = branchName(new Date(), ACTIONS_BRANCH_PREFIX);
+    await git.run(["switch", "-c", name, ...(base ? [base] : [])]);
+    created = { name, from: status.branch };
+    branch = name;
+  }
+
+  // The base branch can differ from what was scanned, so updates are matched by action and ref, not line number.
+  const wanted = items.filter((i) => i.next);
+  const applied: ActionItem[] = [];
   await Promise.all(
-    [...byFile].map(async ([file, fileItems]) => {
+    [...Map.groupBy(wanted, (i) => i.file)].map(async ([file, fileItems]) => {
       const path = join(root, file);
-      const text = (await svc.io.readText(path)) ?? "";
-      const updates = fileItems.flatMap((i) =>
-        i.next ? [{ line: i.line, ref: i.next.ref, comment: i.next.comment }] : [],
+      const text = await svc.io.readText(path);
+      if (text === null) return;
+      const uses = parseWorkflowUses(text);
+      const updates = fileItems.flatMap((item) =>
+        uses
+          .filter((use) => use.action === item.action && use.ref === item.ref)
+          .map((use) => {
+            applied.push(item);
+            return { line: use.line, ref: item.next?.ref ?? use.ref, comment: item.next?.comment };
+          }),
       );
-      await svc.io.writeText(path, applyActionUpdates(text, updates));
+      if (updates.length > 0) await svc.io.writeText(path, applyActionUpdates(text, updates));
     }),
   );
-  const git = createGit(svc.io, root);
-  await git.add([...byFile.keys()]);
-  const names = [...new Set(items.map((i) => i.action))];
+  if (applied.length === 0) {
+    if (created) {
+      await git.switchTo(created.from ?? "-");
+      await git.deleteBranch(created.name);
+    }
+    throw new Error("These actions are already up to date on the default branch.");
+  }
+
+  const files = [...new Set(applied.map((i) => i.file))];
+  await git.add(files);
+  const names = [...new Set(applied.map((i) => i.action))];
   const message =
     names.length === 1
-      ? `ci: bump ${names[0]} to ${items[0]?.latestTag ?? "latest"}`
+      ? `ci: bump ${names[0]} to ${applied[0]?.latestTag ?? "latest"}`
       : `ci: bump ${names.length} GitHub Actions`;
-  await git.run(["commit", "-m", message, "--", ...byFile.keys()]);
+  await git.run(["commit", "-m", message, "--", ...files]);
   await scanActions(svc, repo, { force: true });
+  await Promise.all(repo.projects.map((p) => refreshProject(svc, p.id)));
   await svc.queryClient.invalidateQueries({ queryKey: ["actions"] });
-  return message;
+  return { message, branch };
 }
 
 export async function scanAllActions(svc: Services, signal?: AbortSignal) {
@@ -137,4 +175,29 @@ export async function scanAllActions(svc: Services, signal?: AbortSignal) {
   const repos = await listRepos(svc);
   await Promise.all(repos.map((repo) => limit(async () => (signal?.aborted ? undefined : scanActions(svc, repo)))));
   await svc.queryClient.invalidateQueries({ queryKey: ["actions"] });
+}
+
+/** Instructions an AI coding agent can follow to bump the outdated actions and handle any breaking changes. */
+export function actionsUpdatePrompt(repo: { label: string; github?: string; root?: string }, items: ActionItem[]) {
+  const outdated = items.filter((i) => i.next);
+  const byAction = Map.groupBy(outdated, (i) => i.action);
+  const lines = [...byAction].map(([action, uses]) => {
+    const [first] = uses;
+    const from = first?.current ?? first?.ref ?? "?";
+    const to = first?.latestTag ?? first?.next?.ref ?? "latest";
+    const where = uses.map((u) => `${u.file}:${u.line + 1}`).join(", ");
+    return `- ${action}: ${from} → ${to} (${where}). Release notes: https://github.com/${first?.repo ?? action}/releases`;
+  });
+  return [
+    `Update the outdated GitHub Actions in ${repo.github ?? repo.label}${repo.root ? ` (${repo.root})` : ""}:`,
+    "",
+    ...lines,
+    "",
+    "For each action:",
+    "1. Read the release notes between the current and new version, especially major releases.",
+    "2. Bump the `uses:` ref. Keep the existing pinning style: a SHA pin stays a full commit SHA with the version in a trailing comment, a major tag stays a major tag.",
+    "3. Apply whatever the new version needs: renamed or removed inputs, changed outputs, new required permissions, runner or Node version requirements, and any project config those changes touch.",
+    "",
+    "Work on a new branch, keep the change limited to what these updates require, and commit with a message like `ci: bump GitHub Actions`. Finish with a short list of the breaking changes you handled and anything you could not verify.",
+  ].join("\n");
 }

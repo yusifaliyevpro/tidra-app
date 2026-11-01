@@ -50,13 +50,13 @@ const emitRun = (progress: RunProgress) =>
   runChannel.emit(progress.runId, { ...progress, steps: { ...progress.steps } });
 export const subscribeRun = runChannel.subscribe;
 
-export function branchName(now = new Date()): string {
+export function branchName(now = new Date(), prefix = UPDATE_BRANCH_PREFIX): string {
   const stamp = now
     .toISOString()
     .slice(0, 16)
     .replace(/[-:T]/g, "")
     .replace(/^(\d{8})(\d{4})$/, "$1-$2");
-  return `${UPDATE_BRANCH_PREFIX}${stamp}`;
+  return `${prefix}${stamp}`;
 }
 
 /** Records the run and returns its id together with a promise for the finished progress. */
