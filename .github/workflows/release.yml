@@ -48,8 +48,9 @@ jobs:
           for id in $(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq "$DRAFTS"); do
             gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
           done
-          gh release create "v$VERSION" --draft --target "$GITHUB_SHA" --title "Tidra v$VERSION" --generate-notes
-          ID=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq "$DRAFTS" | head -n1)
+          # The create call returns the id; listing releases right after creating one can miss it.
+          ID=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" -f tag_name="v$VERSION" -f target_commitish="$GITHUB_SHA" -f name="Tidra v$VERSION" -F draft=true -F generate_release_notes=true --jq .id)
+          if [ -z "$ID" ]; then echo "Could not create the draft release." >&2; exit 1; fi
           echo "release_id=$ID" >> "$GITHUB_OUTPUT"
 
   build:

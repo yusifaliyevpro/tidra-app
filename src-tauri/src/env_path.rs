@@ -38,6 +38,7 @@ fn registry_entries() -> Vec<String> {
 }
 
 /// Expands `%NAME%` from the current environment; unknown names stay as they are.
+#[cfg(windows)]
 fn expand(value: &str) -> String {
     let mut out = String::new();
     let mut rest = value;
@@ -72,6 +73,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(windows)]
     fn expands_known_variables_and_keeps_unknown() {
         let home = std::env::var("PATH").unwrap_or_default();
         assert_eq!(expand("%PATH%"), home);
