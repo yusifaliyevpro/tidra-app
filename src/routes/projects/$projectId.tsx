@@ -114,7 +114,6 @@ function ProjectActions({ project, report }: { project: Project; report: Report 
   const path = project.path;
   return (
     <>
-      {report ? <span className="text-sm text-faint">{report.pm.name}</span> : null}
       <BranchActions projectId={project.id} git={report?.git} />
       <SyncButton projectId={project.id} git={report?.git} fork={report?.fork} size="md" />
       {path && inTauri ? (
