@@ -8,6 +8,10 @@
 
 Tidra watches the projects on your machine and tells you what needs attention: outdated dependencies, what changed upstream, security advisories, failing CI, pull requests waiting for you, and broken deploys. When it's time to update, it edits your manifests, installs, runs your checks and commits, without opening an editor.
 
+<p align="center">
+  <img src="assets/overview.png" alt="Tidra overview: outdated packages, advisories, CI and pull requests across every project" />
+</p>
+
 > Status: early development. Not ready for daily use yet.
 
 ## Features
