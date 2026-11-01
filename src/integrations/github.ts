@@ -1,6 +1,6 @@
 import * as z from "@zod/mini";
 import type { Release } from "@/engine/changelog";
-import { fetchWithRetry } from "@/engine/registry";
+import { fetchWithRetry, type HttpCache } from "@/engine/registry";
 
 export class GitHubError extends Error {
   constructor(
@@ -47,6 +47,7 @@ const RunSchema = z.looseObject({
   created_at: z.string(),
   run_number: z.number(),
 });
+const OpenPulls = z.compile(z.array(z.looseObject({ head: z.looseObject({ ref: z.string() }) })));
 const Runs = z.compile(z.looseObject({ workflow_runs: z.array(RunSchema) }));
 export type WorkflowRun = z.infer<typeof RunSchema>;
 
@@ -102,6 +103,18 @@ const GraphQlBody = z.compile(
 const TagName = z.compile(z.looseObject({ tag_name: z.string() }));
 const CommitSha = z.compile(z.looseObject({ sha: z.string() }));
 const CreatedPull = z.compile(z.looseObject({ html_url: z.string() }));
+const BranchPulls = z.compile(
+  z.array(
+    z.looseObject({
+      number: z.number(),
+      html_url: z.string(),
+      state: z.string(),
+      title: z.string(),
+      body: z.nullish(z.string()),
+      merged_at: z.nullish(z.string()),
+    }),
+  ),
+);
 const PullSearch = z.compile(z.looseObject({ nodes: z.array(z.union([PullSchema, z.looseObject({})])) }));
 
 export type CheckState = "success" | "failure" | "pending" | "none";
@@ -133,7 +146,30 @@ const PULL_FIELDS = `... on PullRequest {
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
 }`;
 
-export function createGitHub(options: { fetch: typeof globalThis.fetch; token?: string }) {
+export interface RateLimit {
+  /** `core` for REST, `graphql` for GraphQL; each has its own hourly budget. */
+  resource: string;
+  limit: number;
+  remaining: number;
+  /** Epoch milliseconds when the budget refills. */
+  resetAt: number;
+}
+
+export function readRateLimit(headers: Headers): RateLimit | undefined {
+  const limit = Number(headers.get("x-ratelimit-limit"));
+  const remaining = Number(headers.get("x-ratelimit-remaining"));
+  const reset = Number(headers.get("x-ratelimit-reset"));
+  if (!headers.has("x-ratelimit-limit") || [limit, remaining, reset].some(Number.isNaN)) return undefined;
+  return { resource: headers.get("x-ratelimit-resource") ?? "core", limit, remaining, resetAt: reset * 1000 };
+}
+
+export function createGitHub(options: {
+  fetch: typeof globalThis.fetch;
+  token?: string;
+  /** ETag cache for GETs: a 304 answer does not count against the rate limit. */
+  cache?: HttpCache;
+  onRateLimit?: (limit: RateLimit) => void;
+}) {
   const API = "https://api.github.com";
   const headers = (extra: HeadersInit | undefined) => {
     const merged = new Headers(extra);
@@ -148,6 +184,9 @@ export function createGitHub(options: { fetch: typeof globalThis.fetch; token?: 
       ...init,
       headers: headers(init.headers),
     });
+    const rate = readRateLimit(response.headers);
+    if (rate) options.onRateLimit?.(rate);
+    if (response.status === 304) return response;
     if (!response.ok) {
       const limited = response.status === 403 && response.headers.get("x-ratelimit-remaining") === "0";
       const text = await response.text().catch(() => "");
@@ -159,8 +198,22 @@ export function createGitHub(options: { fetch: typeof globalThis.fetch; token?: 
     return response;
   }
 
+  async function cachedText(path: string): Promise<string> {
+    const key = `github:${path}`;
+    const cached = await options.cache?.get(key);
+    const response = await request(path, cached?.etag ? { headers: { "if-none-match": cached.etag } } : {});
+    if (response.status === 304 && cached) return cached.body;
+    const body = await response.text();
+    const etag = response.headers.get("etag");
+    if (etag) await options.cache?.set(key, { etag, body });
+    return body;
+  }
+
   async function json<S extends z.ZodMiniType>(path: string, schema: S, init?: RequestInit): Promise<z.input<S>> {
-    const data: unknown = await (await request(path, init)).json();
+    const data: unknown =
+      !init?.method || init.method === "GET"
+        ? JSON.parse(await cachedText(path))
+        : await (await request(path, init)).json();
     if (!z.validate(schema, data)) throw new GitHubError(`Unexpected response from ${path}`, 200);
     return data;
   }
@@ -203,8 +256,13 @@ export function createGitHub(options: { fetch: typeof globalThis.fetch; token?: 
 
     repo: (owner: string, repo: string) => json(`/repos/${owner}/${repo}`, RepoSchema),
 
+    /** Free to call: reports the budget without spending it. */
+    rateLimit: () => request("/rate_limit"),
+
     notifications: () => json("/notifications?per_page=50", Notifications),
     markNotificationRead: (id: string) => request(`/notifications/threads/${id}`, { method: "PATCH" }),
+    markNotificationDone: (id: string) => request(`/notifications/threads/${id}`, { method: "DELETE" }),
+    markAllNotificationsRead: () => request("/notifications", { method: "PUT", body: JSON.stringify({}) }),
 
     reviewRequests: () => searchPulls("is:pr is:open archived:false review-requested:@me"),
     myPulls: () => searchPulls("is:pr is:open archived:false author:@me"),
@@ -215,18 +273,22 @@ export function createGitHub(options: { fetch: typeof globalThis.fetch; token?: 
             `is:pr is:open archived:false author:app/dependabot author:app/renovate ${repos.map((r) => `repo:${r}`).join(" ")}`,
             100,
           ),
-    mergePull: (repo: string, number: number, method: "squash" | "merge" | "rebase") =>
-      request(`/repos/${repo}/pulls/${number}/merge`, {
-        method: "PUT",
-        body: JSON.stringify({ merge_method: method }),
-      }),
     createPull: (repo: string, input: { title: string; head: string; base: string; body: string }) =>
       json(`/repos/${repo}/pulls`, CreatedPull, { method: "POST", body: JSON.stringify(input) }),
+    updatePull: (repo: string, number: number, input: { title?: string; body: string }) =>
+      json(`/repos/${repo}/pulls/${number}`, CreatedPull, { method: "PATCH", body: JSON.stringify(input) }),
+
+    /** Pull requests whose head is `owner:branch`, newest first, open or not. */
+    pullsForBranch: (repo: string, head: string) =>
+      json(`/repos/${repo}/pulls?state=all&per_page=5&head=${encodeURIComponent(head)}`, BranchPulls),
+
+    openPullBranches: async (repo: string) =>
+      (await json(`/repos/${repo}/pulls?state=open&per_page=100`, OpenPulls)).map((pull) => pull.head.ref),
 
     workflowRuns: async (repo: string, branch?: string) =>
       (
         await json(
-          `/repos/${repo}/actions/runs?per_page=10${branch ? `&branch=${encodeURIComponent(branch)}` : ""}`,
+          `/repos/${repo}/actions/runs?per_page=40${branch ? `&branch=${encodeURIComponent(branch)}` : ""}`,
           Runs,
         )
       ).workflow_runs,

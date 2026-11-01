@@ -62,6 +62,15 @@ export function githubSlug(url: string | undefined): { owner: string; repo: stri
   return match?.[1] && match[2] ? { owner: match[1], repo: match[2] } : undefined;
 }
 
+export interface ForkInfo {
+  /** Normalized URL of the `upstream` remote, the repo this one was forked from. */
+  remote: string;
+  /** Commits on upstream's default branch that this checkout does not have yet. */
+  behind?: number;
+  /** The upstream ref compared against, e.g. `upstream/main`. */
+  ref?: string;
+}
+
 export interface BranchInfo {
   name: string;
   lastCommit: Date;
@@ -112,6 +121,20 @@ export function createGit(io: Io, cwd: string) {
       const result = await raw(["remote", "get-url", "origin"]);
       return result.code === 0 ? result.stdout.trim() : undefined;
     },
+    /** The `upstream` remote of a fork, compared with the last fetched upstream default branch. */
+    fork: async (): Promise<ForkInfo | undefined> => {
+      const url = await raw(["remote", "get-url", "upstream"]);
+      const remote = url.code === 0 ? normalizeRemote(url.stdout) : undefined;
+      if (!remote) return undefined;
+      for (const ref of ["upstream/HEAD", "upstream/main", "upstream/master"]) {
+        const count = await raw(["rev-list", "--count", `HEAD..${ref}`]);
+        if (count.code === 0) {
+          const head = await raw(["rev-parse", "--abbrev-ref", ref]);
+          return { remote, behind: Number(count.stdout.trim()), ref: head.code === 0 ? head.stdout.trim() : ref };
+        }
+      }
+      return { remote };
+    },
     branches: async () =>
       parseBranches(
         await run(["for-each-ref", "--format=%(refname:short)|%(committerdate:unix)|%(upstream:track)", "refs/heads"]),
@@ -124,6 +147,16 @@ export function createGit(io: Io, cwd: string) {
     headSha: () => run(["rev-parse", "HEAD"]),
     push: (branch: string) => run(["push", "--set-upstream", "origin", branch]),
     fetch: () => run(["fetch", "--all", "--prune"]),
+    pull: () => run(["pull", "--ff-only"]),
+    /** origin's default branch as last fetched, e.g. `main`. */
+    defaultBranch: async () => {
+      const result = await raw(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
+      return result.code === 0 ? result.stdout.trim().replace(/^origin\//, "") : undefined;
+    },
+    /** Commit subjects on HEAD that `base` does not have, oldest first. */
+    subjectsSince: async (base: string) =>
+      (await run(["log", "--reverse", "--format=%s", `${base}..HEAD`])).split("\n").filter(Boolean),
+    pushCurrent: () => run(["push"]),
     restore: (paths: string[]) => run(["checkout", "--", ...paths]),
     stash: () => run(["stash", "push", "--include-untracked", "-m", "tidra: before dependency update"]),
   };
