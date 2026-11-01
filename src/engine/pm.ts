@@ -13,6 +13,39 @@ export function installCommand(pm: PackageManager): Command {
   return { program: pm.name, args: ["install"] };
 }
 
+export type AddField = "dependencies" | "devDependencies" | "optionalDependencies";
+
+/**
+ * `pnpm add react@^19.3.1 --save-dev` and friends. Runs in the importer's folder; `inWorkspaceRoot` adds pnpm's `-w`
+ * so it accepts the workspace root package. `exact` keeps exact pins exact for managers that would add a prefix.
+ */
+export function addCommand(
+  pm: PackageManager,
+  specs: string[],
+  field: AddField,
+  options: { exact: boolean; inWorkspaceRoot: boolean },
+): Command {
+  const flags: string[] = [];
+  if (pm.name === "npm") {
+    flags.push(
+      field === "devDependencies" ? "--save-dev" : field === "optionalDependencies" ? "--save-optional" : "--save",
+    );
+    if (options.exact) flags.push("--save-exact");
+    return { program: "npm", args: ["install", ...specs, ...flags] };
+  }
+  if (pm.name === "pnpm") {
+    if (field === "devDependencies") flags.push("--save-dev");
+    if (field === "optionalDependencies") flags.push("--save-optional");
+    if (options.exact) flags.push("--save-exact");
+    if (options.inWorkspaceRoot) flags.push("--workspace-root");
+    return { program: "pnpm", args: ["add", ...specs, ...flags] };
+  }
+  if (field === "devDependencies") flags.push("--dev");
+  if (field === "optionalDependencies") flags.push("--optional");
+  if (options.exact) flags.push("--exact");
+  return { program: pm.name, args: ["add", ...specs, ...flags] };
+}
+
 export function scriptCommand(pm: PackageManager, script: string): Command {
   return { program: pm.name, args: ["run", script] };
 }

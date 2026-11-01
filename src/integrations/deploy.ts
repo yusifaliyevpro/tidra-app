@@ -22,7 +22,8 @@ export interface DeployProvider {
   id: string;
   label: string;
   /** Secrets this provider needs, in the order the settings form asks for them. */
-  fields: { key: SecretKey; label: string; placeholder?: string }[];
+  /** `hint` is a few words shown under the label; `url` is where the user creates the value. */
+  fields: { key: SecretKey; label: string; hint?: string; url?: string }[];
   /** Latest deployment per site or project. */
   latest(fetcher: typeof fetch, secrets: Partial<Record<SecretKey, string>>): Promise<Deployment[]>;
 }
@@ -61,7 +62,7 @@ const VERCEL_STATES: Record<string, DeployState> = {
 export const vercel: DeployProvider = {
   id: "vercel",
   label: "Vercel",
-  fields: [{ key: SECRET_KEYS.vercel, label: "Access token", placeholder: "Created at vercel.com/account/tokens" }],
+  fields: [{ key: SECRET_KEYS.vercel, label: "Access token", url: "https://vercel.com/account/tokens" }],
   async latest(fetcher, secrets) {
     const token = secrets[SECRET_KEYS.vercel];
     if (!token) return [];
@@ -128,7 +129,13 @@ const NETLIFY_STATES: Record<string, DeployState> = {
 export const netlify: DeployProvider = {
   id: "netlify",
   label: "Netlify",
-  fields: [{ key: SECRET_KEYS.netlify, label: "Personal access token" }],
+  fields: [
+    {
+      key: SECRET_KEYS.netlify,
+      label: "Personal access token",
+      url: "https://app.netlify.com/user/applications#personal-access-tokens",
+    },
+  ],
   async latest(fetcher, secrets) {
     const token = secrets[SECRET_KEYS.netlify];
     if (!token) return [];
@@ -204,8 +211,13 @@ export const cloudflare: DeployProvider = {
   id: "cloudflare",
   label: "Cloudflare Pages",
   fields: [
-    { key: SECRET_KEYS.cloudflareAccount, label: "Account ID" },
-    { key: SECRET_KEYS.cloudflare, label: "API token", placeholder: "Needs Cloudflare Pages: Read" },
+    { key: SECRET_KEYS.cloudflareAccount, label: "Account ID", hint: "In your dashboard URL" },
+    {
+      key: SECRET_KEYS.cloudflare,
+      label: "API token",
+      hint: "Cloudflare Pages: Read",
+      url: "https://dash.cloudflare.com/profile/api-tokens",
+    },
   ],
   async latest(fetcher, secrets) {
     const token = secrets[SECRET_KEYS.cloudflare];

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { parseNodeIndex, parsePnpmGlobalOutdated, parseVersionOutput, parseWingetUpgrades } from "@/engine/toolchain";
+import {
+  chocolateyNodeUpdate,
+  encodePowerShell,
+  parseNodeIndex,
+  parsePnpmGlobalOutdated,
+  parseVersionOutput,
+  parseWingetUpgrades,
+} from "@/engine/toolchain";
 
 describe("parseVersionOutput", () => {
   it("reads versions from common --version outputs", () => {
@@ -55,5 +62,29 @@ describe("parseNodeIndex", () => {
     ];
     expect(parseNodeIndex(index)).toEqual({ current: "27.1.0", lts: "26.12.1" });
     expect(parseNodeIndex("nope")).toEqual({});
+  });
+});
+
+const decode = (base64: string) => Buffer.from(base64, "base64").toString("utf16le");
+
+describe("chocolateyNodeUpdate", () => {
+  it("elevates and installs the exact version, bootstrapping Chocolatey if needed", () => {
+    const command = chocolateyNodeUpdate("26.13.0");
+    expect(command.program).toBe("powershell");
+    expect(command.args.slice(0, 2)).toEqual(["-NoProfile", "-EncodedCommand"]);
+    const launcher = decode(command.args[2] ?? "");
+    expect(launcher).toMatch(/-Verb RunAs .*-ArgumentList '-NoProfile'/);
+    const inner = decode(/'-EncodedCommand','([^']+)'/.exec(launcher)?.[1] ?? "");
+    expect(inner).toContain('choco upgrade nodejs --version="26.13.0" -y');
+    expect(inner).toContain("community.chocolatey.org/install.ps1");
+    expect(inner).toContain(String.raw`$env:ALLUSERSPROFILE\chocolatey\bin`);
+  });
+
+  it("refuses anything that is not a plain version", () => {
+    expect(() => chocolateyNodeUpdate('26"; Remove-Item C:/ -Recurse; "')).toThrow("Not a Node.js version");
+  });
+
+  it("encodes UTF-16LE like PowerShell expects", () => {
+    expect(encodePowerShell("ab")).toBe(Buffer.from("ab", "utf16le").toString("base64"));
   });
 });

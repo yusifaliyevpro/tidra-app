@@ -34,6 +34,8 @@
   --text-lg--line-height: 22px;
   --text-xl: 18px;
   --text-xl--line-height: 26px;
+  --text-2xl: 26px;
+  --text-2xl--line-height: 32px;
 
   --radius-sm: 4px;
   --radius-md: 6px;

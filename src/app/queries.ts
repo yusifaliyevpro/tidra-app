@@ -1,14 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import type * as z from "@zod/mini";
 import type { SecretKey } from "@/core/secrets";
-import { readActions } from "@/services/actions";
+import { readAllActions } from "@/services/actions";
 import type { TimelineItem } from "@/services/changelogs";
 import { readDeploys } from "@/services/deploys";
 import { readBotPulls, readCi, readInbox } from "@/services/github-feed";
 import { dismissedAdvisories, homeSummary, readCiThreshold } from "@/services/home";
 import { readPackages } from "@/services/packages";
 import { readAllReports, readReport } from "@/services/projects";
-import { readSecurity } from "@/services/security";
+import { listRepos } from "@/services/repos";
+import { readAllSecurity } from "@/services/security";
 import { readSnapshot } from "@/services/snapshot";
 import { syncStatus } from "@/services/sync";
 import { readToolchain } from "@/services/toolchain";
@@ -18,6 +19,12 @@ import { useServices } from "./services";
 export function useReports() {
   const svc = useServices();
   return useQuery({ queryKey: ["reports"], queryFn: () => readAllReports(svc) });
+}
+
+/** Under the `reports` key so every report refresh also refreshes the repo view. */
+export function useRepos() {
+  const svc = useServices();
+  return useQuery({ queryKey: ["reports", "repos"], queryFn: () => listRepos(svc) });
 }
 
 export function useProject(projectId: string) {
@@ -48,10 +55,11 @@ export function useSecurity() {
         readCiThreshold(svc),
         dismissedAdvisories(svc),
       ]);
-      const reports = await Promise.all(
-        projects.map(async (project) => ({ project, report: await readSecurity(svc, project.id) })),
+      const security = await readAllSecurity(
+        svc,
+        projects.map((p) => p.id),
       );
-      return { reports, threshold, dismissed };
+      return { reports: projects.map((project, i) => ({ project, report: security[i] })), threshold, dismissed };
     },
   });
 }
@@ -60,10 +68,7 @@ export function useActions() {
   const svc = useServices();
   return useQuery({
     queryKey: ["actions"],
-    queryFn: async () => {
-      const projects = await svc.store.listProjects();
-      return Promise.all(projects.map(async (project) => ({ project, report: await readActions(svc, project.id) })));
-    },
+    queryFn: () => readAllActions(svc),
   });
 }
 
@@ -72,7 +77,7 @@ export function useTimeline() {
   return useQuery({
     queryKey: ["timeline"],
     queryFn: async () =>
-      (await readSnapshot<{ items: TimelineItem[]; errors: string[] }>(svc, "timeline"))?.data ?? null,
+      (await readSnapshot<{ items: TimelineItem[]; errors: string[] }>(svc, "watched-releases"))?.data ?? null,
   });
 }
 

@@ -3,6 +3,7 @@ import {
   cvssBaseScore,
   DEFAULT_CI_THRESHOLD,
   fixedVersion,
+  groupFindings,
   severityOf,
   toFinding,
   wouldFailCi,
@@ -90,5 +91,37 @@ describe("CI mirror", () => {
 
   it("ignores dismissed advisories", () => {
     expect(wouldFailCi([finding("critical", false)], DEFAULT_CI_THRESHOLD, new Set([vuln.id]))).toBe(false);
+  });
+});
+
+const grouped = (id: string, version: string, severity: Finding["severity"], fixedIn?: string): Finding => ({
+  id,
+  aliases: [],
+  summary: id,
+  severity,
+  name: "brace-expansion",
+  version,
+  dev: false,
+  direct: false,
+  fixedIn,
+  url: `https://osv.dev/${id}`,
+});
+
+describe("groupFindings", () => {
+  it("folds advisories of one major line into a row with the highest fix", () => {
+    const groups = groupFindings([
+      grouped("A", "5.0.6", "high", "5.0.7"),
+      grouped("B", "5.0.6", "moderate", "5.0.11"),
+      grouped("C", "2.1.0", "high", "2.1.2"),
+    ]);
+    expect(groups.map((g) => [g.key, g.findings.length, g.fixedIn, g.severity])).toEqual([
+      ["brace-expansion@5", 2, "5.0.11", "high"],
+      ["brace-expansion@2", 1, "2.1.2", "high"],
+    ]);
+  });
+
+  it("has no fix when one advisory in the group has none", () => {
+    const [group] = groupFindings([grouped("A", "1.0.0", "low", "1.0.1"), grouped("B", "1.0.0", "low")]);
+    expect(group?.fixedIn).toBeUndefined();
   });
 });

@@ -65,6 +65,15 @@ describe("parsePnpmLock", () => {
     expect(lock.installed("packages/ui", "zod")).toBe("4.6.7");
   });
 
+  it("reads the project document when pnpm puts its own lock first", () => {
+    const env =
+      "---\nlockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    configDependencies: {}\n    packageManagerDependencies:\n      pnpm:\n        specifier: '>=12.11.0'\n        version: 12.14.0\n\npackages:\n\n  '@pnpm/exe@12.14.0':\n    resolution: {integrity: sha512-x}\n\n";
+    const both = parsePnpmLock(`${env}---\n${PNPM}`);
+    expect(both.installed(".", "react")).toBe("19.3.1");
+    expect(both.packages.some((p) => p.name === "@pnpm/exe")).toBe(false);
+    expect(both.packages.some((p) => p.name === "react")).toBe(true);
+  });
+
   it("ignores workspace links", () => {
     expect(lock.installed("packages/ui", "shared")).toBeUndefined();
   });

@@ -1,5 +1,6 @@
 import * as z from "@zod/mini";
 import semver from "semver";
+import type { Command } from "./pm";
 
 /** First semver-looking token in `--version` output (`git version 2.47.1.windows.2` → 2.47.1). */
 export function parseVersionOutput(output: string): string | undefined {
@@ -74,4 +75,47 @@ export function parseNodeIndex(data: unknown): { lts?: string; current?: string 
     current: data[0]?.version.replace(/^v/, ""),
     lts: data.find((release) => release.lts !== false)?.version.replace(/^v/, ""),
   };
+}
+
+/** `-EncodedCommand` payload: base64 of the script as UTF-16LE, so no quoting can break or inject. */
+export function encodePowerShell(script: string): string {
+  let binary = "";
+  for (const char of script) {
+    const code = char.charCodeAt(0);
+    binary += String.fromCharCode(code & 0xff, code >> 8);
+  }
+  return btoa(binary);
+}
+
+const CHOCOLATEY_INSTALL = "https://community.chocolatey.org/install.ps1";
+
+/**
+ * Installs Node.js `version` with Chocolatey in an elevated PowerShell (UAC prompt), installing Chocolatey
+ * first when it's missing. The window stays open on failure so the error can be read.
+ */
+export function chocolateyNodeUpdate(version: string): Command {
+  if (!semver.valid(version)) throw new Error(`Not a Node.js version: ${version}`);
+  const elevated = [
+    "$ErrorActionPreference = 'Stop'",
+    "try {",
+    "  if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {",
+    "    Set-ExecutionPolicy Bypass -Scope Process -Force",
+    "    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072",
+    `    Invoke-RestMethod ${CHOCOLATEY_INSTALL} | Invoke-Expression`,
+    String.raw`    $env:Path += ";$env:ALLUSERSPROFILE\chocolatey\bin"`,
+    "  }",
+    `  choco upgrade nodejs --version="${version}" -y`,
+    '  if ($LASTEXITCODE -ne 0) { throw "choco exited with $LASTEXITCODE" }',
+    "} catch {",
+    "  Write-Host $_ -ForegroundColor Red",
+    "  Read-Host 'Press Enter to close'",
+    "  exit 1",
+    "}",
+  ].join("\n");
+  // One line: a parameter name at the end of a line leaves it without a value.
+  const launcher = [
+    `$p = Start-Process powershell -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${encodePowerShell(elevated)}'`,
+    "exit $p.ExitCode",
+  ].join("\n");
+  return { program: "powershell", args: ["-NoProfile", "-EncodedCommand", encodePowerShell(launcher)] };
 }

@@ -1,18 +1,19 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { matchesAccelerator } from "./accelerator";
 import { MODULES } from "./modules";
 
 const isTyping = (target: EventTarget | null) =>
   target instanceof HTMLElement &&
   (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
-/** Ctrl+K opens the palette; `g` then a module key navigates, like Linear and GitHub. */
-export function useGlobalShortcuts(openPalette: () => void) {
+/** The palette shortcut (Ctrl+P by default) opens the palette; `g` then a module key navigates, like Linear. */
+export function useGlobalShortcuts(openPalette: () => void, paletteShortcut: string) {
   const navigate = useNavigate();
   useEffect(() => {
     let pendingG = 0;
     const onKey = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+      if (matchesAccelerator(event, paletteShortcut)) {
         event.preventDefault();
         openPalette();
         return;
@@ -31,7 +32,7 @@ export function useGlobalShortcuts(openPalette: () => void) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navigate, openPalette]);
+  }, [navigate, openPalette, paletteShortcut]);
 }
 
 /** j/k/Enter navigation for a list of ids; the caller decides what selecting and opening mean. */

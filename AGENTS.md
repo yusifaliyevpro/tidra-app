@@ -54,6 +54,14 @@ Rules:
 - **Secrets** only via `src/core/secrets.ts` (keychain). Never in SQLite, logs or the repo. They sync only inside the encrypted vault.
 - **Sync providers** implement `SyncProvider` and register in `src/sync/registry.ts`; they move encrypted envelopes only and never touch crypto.
 - **Project identity** is the normalized git remote plus the folder inside the repo (`subdir`), so a monorepo's `apps/*` are separate projects grouped under the repo. Discovery (`src/engine/discover.ts`) walks up to 4 levels and stops at the first `package.json` on each branch.
+- **Repo-level views** (git state, CI, Actions workflows, forks) work per repository through `listRepos()` (`src/services/repos.ts`), never per package, so a monorepo shows once.
+- **GitHub budget**: every GET goes through the ETag cache (304s are free) and records the rate limit (`src/services/github-limit.ts`, shown on Home). Don't fetch GitHub per package or per project when per repo will do.
+- **Notifications**: only news, never a backlog. Advisories notify when a high or critical one is new since the last scan (the first scan just records a baseline), one entry per project. The desktop only gets grouped messages: "You have new high security advisories" and "You have N new notifications". Only notify about fresh events (last 2 days).
+- **Fingerprints** (`src/engine/fingerprint.ts`): `loadWorkspace` hashes every input (manifests, workspace yaml, npm config, lockfile) with SHA-256. Unchanged projects reuse the last registry answers for 2 h, security scans skip OSV for 12 h while the lockfile hash matches, Actions scans skip for 6 h while workflow files match, and parsed lockfiles are cached by hash. "Check again" on a project forces a fresh check.
+- **Background jobs at launch**: each job's last successful run is kept in `kv` (`jobLastRuns`), so a relaunch only runs what is due. At most three jobs run at once, in the priority order in `src/services/jobs.ts`. A full project refresh shares one set of git calls per checkout (`GitInfoCache`), so a monorepo's packages don't each run git.
+- **Reads in bulk**: list screens read snapshots with `readSnapshots` (one query), and background writes call `svc.invalidate(...)`, which coalesces query invalidations so a 30-project refresh rerenders once.
+- **Error boundaries**: routes use `RouteError`; panels, chrome and table rows wrap in `ErrorBoundary` (`src/ui/error-boundary.tsx`) so one bad snapshot never blanks a screen. Unhandled promise rejections surface as one toast.
+- **Changelogs** cover only what the user watches (packages in the `watchedPackages` setting, repos in `watched_repos`). Nothing is watched automatically.
 - **Migrations**: the app is unreleased, so schema changes are still folded into `drizzle/0000_init.sql` (delete `drizzle/`, rerun `pnpm db:generate --name init`). After release, add numbered migrations instead.
 
 ## Native feel (desktop rules)
@@ -79,7 +87,8 @@ Rules:
 - Respect `minimumReleaseAge` (needs full packument `time`; abbreviated metadata has no publish times).
 - Never send the abbreviated Accept header to `/<pkg>/latest` (406).
 - 0.x: minor bump is breaking; 0.0.x: patch bump is breaking.
-- Writes keep formatting, range prefix, `saveExact`, and dependency field (devDependencies stay dev). Peer ranges are never rewritten.
+- Updates run the package manager's own `add` (`planAddCommands`) in each importer's folder, keeping range prefix, exact pins and dependency field. Tidra only writes catalog entries itself, then installs. Peer ranges are never rewritten.
+- pnpm 11+ may write `pnpm-lock.yaml` as two YAML documents (its own lock first); the project's is the last one.
 - Catalog/override edits go through the `yaml` Document API to keep comments.
 - Retry 429/5xx/network with backoff; always clear abort timers.
 - Monorepo release tags (`expo-router@58.0.29`) only appear in Changelogs for packages the user depends on, unless the repo is watched.
@@ -98,7 +107,12 @@ Every feature from the plan is implemented and `pnpm check` is green (~170 TS te
 Done:
 
 - Engine, core, Rust layer, sync (E2EE vault, Turso, Supabase), integrations, services, preview mode
-- All screens: Home (needs-attention list), Projects (grouped by repo, batch updates), project page, Changelogs, Security, Dependency search, Actions, Git, Inbox, CI, Bot PRs, Deploys, My packages, Toolchain, Scripts and ports, Settings (Windows 11 style panes, shortcut recorder, delete all data), onboarding
+- All screens: Overview (dashboard: totals, needs-attention table, recent updates, releases, background checks), Projects (filters, branch switcher, grouped by repo), project page, Changelogs, Security (per package), Actions (collapsible per repo), Git, Pull requests, CI, Bot PRs (read-only list), Deploys, My packages, Toolchain, Scripts and ports, Settings (Windows 11 style panes, shortcut recorder, delete all data), onboarding
+- Dependency search lives in the palette (Ctrl+P by default, set in Settings): type a package to see where it is used and update it everywhere
+- Push and open a PR from Tidra (`BranchActions`); merging stays on GitHub, the app never merges
+- Sync (`syncRepo`, `SyncButton`): fetch, fast-forward a fork's default branch to `upstream`, pull, push; never merges or rebases on its own
+- Scripts runs any project's scripts; starting one from a project page or Toolchain opens its live output in a dialog there
+- The sidebar resumes each section where it was left (the project tab is in the URL); clicking the current section again goes to its root
 - Native feel pass, flash fixes, copy pass
 - CI and release workflows, updater signing via `.env.local`
 

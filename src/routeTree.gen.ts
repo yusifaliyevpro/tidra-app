@@ -15,7 +15,6 @@ import { Route as BotsRouteImport } from './routes/bots'
 import { Route as ChangelogsRouteImport } from './routes/changelogs'
 import { Route as CiRouteImport } from './routes/ci'
 import { Route as DeploysRouteImport } from './routes/deploys'
-import { Route as DepsRouteImport } from './routes/deps'
 import { Route as GitRouteImport } from './routes/git'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
@@ -55,11 +54,6 @@ const CiRoute = CiRouteImport.update({
 const DeploysRoute = DeploysRouteImport.update({
   id: '/deploys',
   path: '/deploys',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DepsRoute = DepsRouteImport.update({
-  id: '/deps',
-  path: '/deps',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GitRoute = GitRouteImport.update({
@@ -120,7 +114,6 @@ export interface FileRoutesByFullPath {
   '/changelogs': typeof ChangelogsRoute
   '/ci': typeof CiRoute
   '/deploys': typeof DeploysRoute
-  '/deps': typeof DepsRoute
   '/git': typeof GitRoute
   '/inbox': typeof InboxRoute
   '/onboarding': typeof OnboardingRoute
@@ -139,7 +132,6 @@ export interface FileRoutesByTo {
   '/changelogs': typeof ChangelogsRoute
   '/ci': typeof CiRoute
   '/deploys': typeof DeploysRoute
-  '/deps': typeof DepsRoute
   '/git': typeof GitRoute
   '/inbox': typeof InboxRoute
   '/onboarding': typeof OnboardingRoute
@@ -159,7 +151,6 @@ export interface FileRoutesById {
   '/changelogs': typeof ChangelogsRoute
   '/ci': typeof CiRoute
   '/deploys': typeof DeploysRoute
-  '/deps': typeof DepsRoute
   '/git': typeof GitRoute
   '/inbox': typeof InboxRoute
   '/onboarding': typeof OnboardingRoute
@@ -180,7 +171,6 @@ export interface FileRouteTypes {
     | '/changelogs'
     | '/ci'
     | '/deploys'
-    | '/deps'
     | '/git'
     | '/inbox'
     | '/onboarding'
@@ -199,7 +189,6 @@ export interface FileRouteTypes {
     | '/changelogs'
     | '/ci'
     | '/deploys'
-    | '/deps'
     | '/git'
     | '/inbox'
     | '/onboarding'
@@ -218,7 +207,6 @@ export interface FileRouteTypes {
     | '/changelogs'
     | '/ci'
     | '/deploys'
-    | '/deps'
     | '/git'
     | '/inbox'
     | '/onboarding'
@@ -238,7 +226,6 @@ export interface RootRouteChildren {
   ChangelogsRoute: typeof ChangelogsRoute
   CiRoute: typeof CiRoute
   DeploysRoute: typeof DeploysRoute
-  DepsRoute: typeof DepsRoute
   GitRoute: typeof GitRoute
   InboxRoute: typeof InboxRoute
   OnboardingRoute: typeof OnboardingRoute
@@ -293,13 +280,6 @@ declare module '@tanstack/react-router' {
       path: '/deploys'
       fullPath: '/deploys'
       preLoaderRoute: typeof DeploysRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/deps': {
-      id: '/deps'
-      path: '/deps'
-      fullPath: '/deps'
-      preLoaderRoute: typeof DepsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/git': {
@@ -382,7 +362,6 @@ const rootRouteChildren: RootRouteChildren = {
   ChangelogsRoute: ChangelogsRoute,
   CiRoute: CiRoute,
   DeploysRoute: DeploysRoute,
-  DepsRoute: DepsRoute,
   GitRoute: GitRoute,
   InboxRoute: InboxRoute,
   OnboardingRoute: OnboardingRoute,

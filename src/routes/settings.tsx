@@ -19,6 +19,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { DEFAULT_PALETTE_SHORTCUT, PALETTE_SHORTCUT_SETTING } from "@/app/accelerator";
 import {
   ACCENT_SETTING,
   applyAppearance,
@@ -46,6 +47,7 @@ import { NOTIFICATION_KINDS, NOTIFY_SETTING, readNotifyPrefs } from "@/services/
 import { Button } from "@/ui/button";
 import { Input, Select, Switch } from "@/ui/field";
 import { ErrorNote } from "@/ui/layout";
+import { ExternalLink } from "@/ui/markdown";
 import { TimeAgo } from "@/ui/time";
 import { toast, toastError } from "@/ui/toast";
 
@@ -132,6 +134,7 @@ function GeneralPane() {
   const svc = useServices();
   const queryClient = useQueryClient();
   const { data: hotkey } = useSetting(HOTKEY_SETTING, z.string(), DEFAULT_HOTKEY);
+  const { data: paletteKey } = useSetting(PALETTE_SHORTCUT_SETTING, z.string(), DEFAULT_PALETTE_SHORTCUT);
   const { data: accent } = useSetting(ACCENT_SETTING, z.string(), DEFAULT_ACCENT);
   const autostart = useQuery({ queryKey: ["autostart"], queryFn: () => isEnabled(), enabled: inTauri });
   const version = useQuery({ queryKey: ["version"], queryFn: () => getVersion(), enabled: inTauri });
@@ -142,6 +145,12 @@ function GeneralPane() {
       await svc.store.setSetting(HOTKEY_SETTING, value);
       setHotkeyError(await applyHotkey(svc));
       await queryClient.invalidateQueries({ queryKey: ["setting", HOTKEY_SETTING] });
+    },
+  });
+  const savePaletteKey = useMutation({
+    mutationFn: async (value: string) => {
+      await svc.store.setSetting(PALETTE_SHORTCUT_SETTING, value || DEFAULT_PALETTE_SHORTCUT);
+      await queryClient.invalidateQueries({ queryKey: ["setting", PALETTE_SHORTCUT_SETTING] });
     },
   });
   const saveAccent = useMutation({
@@ -190,6 +199,11 @@ function GeneralPane() {
         <SettingRow label="Show or hide Tidra" description="Backspace turns it off">
           {(id) => <ShortcutInput id={id} value={hotkey ?? ""} onChange={(value) => saveHotkey.mutate(value)} />}
         </SettingRow>
+        <SettingRow label="Command palette">
+          {(id) => (
+            <ShortcutInput id={id} value={paletteKey ?? ""} onChange={(value) => savePaletteKey.mutate(value)} />
+          )}
+        </SettingRow>
       </SettingsGroup>
       {hotkeyError ? <ErrorNote>Another app uses this shortcut: {hotkeyError}</ErrorNote> : null}
       <SettingsGroup title="Appearance">
@@ -226,7 +240,7 @@ function DeploysPane() {
               key={field.key}
               secretKey={field.key}
               label={field.label}
-              placeholder={field.placeholder}
+              description={<FieldHint hint={field.hint} url={field.url} />}
               secret={!field.key.endsWith("account")}
             />
           ))}
@@ -441,5 +455,16 @@ function NotificationsPane() {
         </SettingRow>
       ))}
     </SettingsGroup>
+  );
+}
+
+function FieldHint({ hint, url }: { hint?: string; url?: string }) {
+  if (!hint && !url) return null;
+  return (
+    <>
+      {hint}
+      {hint && url ? " · " : null}
+      {url ? <ExternalLink href={url}>Create a token</ExternalLink> : null}
+    </>
   );
 }

@@ -2,9 +2,9 @@ import { createGit, GitError, isClean } from "./git";
 import type { Io, OutputStream } from "./io";
 import { editCatalogs, editManifest, type CatalogEdit, type ManifestEdit } from "./manifest";
 import type { OutdatedEntry } from "./outdated";
-import { relative } from "./path";
-import { display, installCommand, type Check, type Command } from "./pm";
-import { formatSpec } from "./spec";
+import { join, relative } from "./path";
+import { addCommand, display, installCommand, type AddField, type Check, type Command } from "./pm";
+import { formatSpec, rangeStyle } from "./spec";
 import type { Workspace } from "./workspace";
 
 export interface Selection {
@@ -16,6 +16,16 @@ export interface FileChange {
   path: string;
   before: string;
   after: string;
+}
+
+/**
+ * The package.json key for a dependency: its own name, or an alias whose `npm:` spec points at it. Matching on the
+ * spec alone would confuse packages that share a version, like a family of `@tiptap/*` packages all at 3.32.0.
+ */
+export function manifestKey(deps: Record<string, string> | undefined, name: string, spec: string): string | undefined {
+  if (!deps) return undefined;
+  if (deps[name] === spec) return name;
+  return Object.entries(deps).find(([, value]) => value === spec && value.startsWith(`npm:${name}@`))?.[0];
 }
 
 /** Computes every file rewrite for the selection. Peer ranges are left alone; they describe consumers, not this project. */
@@ -37,7 +47,7 @@ export function planFileChanges(workspace: Workspace, selections: Selection[]): 
       if (usage.field === "peerDependencies") continue;
       const importer = importers.get(usage.importer);
       if (!importer) continue;
-      const key = Object.entries(importer.manifest[usage.field] ?? {}).find(([, v]) => v === usage.spec)?.[0];
+      const key = manifestKey(importer.manifest[usage.field], entry.name, usage.spec);
       if (!key) continue;
       const edits = manifestEdits.get(importer.manifestPath) ?? [];
       edits.push({ field: usage.field, name: key, value: formatSpec(usage.spec, version, workspace.saveExact) });
@@ -61,6 +71,43 @@ export function planFileChanges(workspace: Workspace, selections: Selection[]): 
   return changes;
 }
 
+export interface AddStep {
+  /** Importer folder relative to the workspace root, "." for the root. */
+  importer: string;
+  command: Command;
+}
+
+/**
+ * The package-manager commands that apply the selection: one `add` per importer, dependency field and pin style, so
+ * the manager writes package.json and the lockfile itself. Catalog entries are not covered; they live in the catalog.
+ */
+export function planAddCommands(workspace: Workspace, selections: Selection[]): AddStep[] {
+  const groups = new Map<string, { importer: string; field: AddField; exact: boolean; specs: string[] }>();
+  const importers = new Map(workspace.importers.map((i) => [i.path, i]));
+  for (const { entry, version } of selections) {
+    if (entry.catalog) continue;
+    for (const usage of entry.usages) {
+      if (usage.field === "peerDependencies") continue;
+      const importer = importers.get(usage.importer);
+      const key = manifestKey(importer?.manifest[usage.field], entry.name, usage.spec);
+      if (!key) continue;
+      const spec = formatSpec(usage.spec, version, workspace.saveExact);
+      const exact = rangeStyle(spec) === "exact";
+      const id = `${usage.importer}\u0000${usage.field}\u0000${exact}`;
+      const group = groups.get(id) ?? { importer: usage.importer, field: usage.field, exact, specs: [] };
+      group.specs.push(`${key}@${spec}`);
+      groups.set(id, group);
+    }
+  }
+  return [...groups.values()].map(({ importer, field, exact, specs }) => ({
+    importer,
+    command: addCommand(workspace.pm, specs, field, {
+      exact,
+      inWorkspaceRoot: importer === "." && Boolean(workspace.workspaceYaml) && workspace.importers.length > 1,
+    }),
+  }));
+}
+
 /** `chore(deps): bump react 19.2.0 → 19.3.1` for one package; a summary line plus a list for several. */
 export function commitMessage(selections: Selection[]): string {
   const line = ({ entry, version }: Selection) => `${entry.name} ${entry.current ?? entry.range} → ${version}`;
@@ -77,6 +124,8 @@ export type StepState = "running" | "done" | "skipped" | "failed";
 export interface UpdateOptions {
   /** Create and switch to this branch first; `undefined` updates the current branch. */
   branch?: string;
+  /** Already on an update branch from an earlier run: commit there and push it like a created one. */
+  continueBranch?: boolean;
   /** Stash local changes instead of refusing to run on a dirty tree. */
   stash?: boolean;
   checks: Check[];
@@ -94,6 +143,7 @@ export interface UpdateResult {
   previousBranch?: string;
   createdBranch?: string;
   commitSha?: string;
+  pushed?: boolean;
   changes: FileChange[];
   /** Files the update touched, relative to the project root, for revert. */
   touched: string[];
@@ -119,10 +169,14 @@ export async function runUpdate(
   const result: UpdateResult = { ok: false, changes, touched: [] };
   let step: UpdateStep = "preflight";
 
-  const exec = async (command: Command) => {
-    options.onOutput?.(`$ ${display(command)}\n`, "stdout");
+  const exec = async (command: Command, cwd = workspace.root) => {
+    options.onOutput?.(
+      `$ ${display(command)}
+`,
+      "stdout",
+    );
     const run = await io.run(command.program, command.args, {
-      cwd: workspace.root,
+      cwd,
       env: { FORCE_COLOR: "1" },
       onOutput: options.onOutput,
       signal: options.signal,
@@ -135,6 +189,8 @@ export async function runUpdate(
   };
   const skip = (next: UpdateStep) => options.onStep?.(next, "skipped");
   const done = () => options.onStep?.(step, "done");
+  const catalogChanges = changes.filter((c) => c.path === workspace.workspaceYaml?.path);
+  const adds = planAddCommands(workspace, selections);
 
   try {
     begin("preflight");
@@ -154,15 +210,21 @@ export async function runUpdate(
       done();
     } else skip("branch");
 
-    begin("write");
-    for (const change of changes) await io.writeText(change.path, change.after);
     result.touched = changes.map((c) => relative(workspace.root, c.path));
-    done();
+    if (catalogChanges.length > 0) {
+      begin("write");
+      for (const change of catalogChanges) await io.writeText(change.path, change.after);
+      done();
+    } else skip("write");
 
     begin("install");
-    await exec(installCommand(workspace.pm));
-    for (const name of LOCKFILE_NAMES) {
-      if (await io.exists(`${workspace.root}/${name}`)) result.touched.push(name);
+    for (const add of adds) await exec(add.command, join(workspace.root, add.importer));
+    if (catalogChanges.length > 0) await exec(installCommand(workspace.pm));
+    for (const dir of new Set([".", ...adds.map((a) => a.importer)])) {
+      for (const name of LOCKFILE_NAMES) {
+        const path = dir === "." ? name : `${dir}/${name}`;
+        if (!result.touched.includes(path) && (await io.exists(join(workspace.root, path)))) result.touched.push(path);
+      }
     }
     done();
 
@@ -180,9 +242,11 @@ export async function runUpdate(
       done();
     } else skip("commit");
 
-    if (options.push && options.commit && result.createdBranch) {
+    const pushBranch = result.createdBranch ?? (options.continueBranch ? result.previousBranch : undefined);
+    if (options.push && options.commit && pushBranch) {
       begin("push");
-      await git.push(result.createdBranch);
+      await git.push(pushBranch);
+      result.pushed = true;
       done();
     } else skip("push");
 

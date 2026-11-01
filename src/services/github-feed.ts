@@ -1,4 +1,3 @@
-import { githubSlug } from "@/engine/git";
 import {
   checkState,
   failingSection,
@@ -8,6 +7,7 @@ import {
   type WorkflowRun,
 } from "@/integrations/github";
 import type { Services } from "./context";
+import { listRepos } from "./repos";
 import { readSnapshot, writeSnapshot } from "./snapshot";
 
 export interface PullSummary {
@@ -82,21 +82,34 @@ export async function refreshInbox(svc: Services): Promise<InboxSnapshot> {
   return snapshot;
 }
 
+/** Marks threads read (or done) on GitHub and drops them from the local inbox without refetching it. */
+export async function clearNotifications(svc: Services, ids: string[] | "all", done = false) {
+  const github = await svc.github();
+  if (ids === "all") await github.markAllNotificationsRead();
+  else await Promise.all(ids.map((id) => (done ? github.markNotificationDone(id) : github.markNotificationRead(id))));
+  const inbox = await readInbox(svc);
+  if (inbox) {
+    const gone = ids === "all" ? undefined : new Set(ids);
+    await writeSnapshot(svc, "inbox", {
+      ...inbox,
+      notifications: inbox.notifications.filter((n) => gone && !gone.has(n.id)),
+    });
+  }
+  await svc.queryClient.invalidateQueries({ queryKey: ["inbox"] });
+  await svc.queryClient.invalidateQueries({ queryKey: ["home"] });
+}
+
 export const readInbox = async (svc: Services) => (await readSnapshot<InboxSnapshot>(svc, "inbox"))?.data;
 
-/** GitHub repos (`owner/repo`) of every project with a GitHub remote. */
-export async function projectRepos(svc: Services): Promise<{ projectId: string; name: string; repo: string }[]> {
-  const projects = await svc.store.listProjects();
-  return projects.flatMap((p) => {
-    const slug = p.remote ? githubSlug(`https://${p.remote}`) : undefined;
-    return slug ? [{ projectId: p.id, name: p.name, repo: `${slug.owner}/${slug.repo}` }] : [];
-  });
+/** GitHub repos (`owner/repo`) of every project, once per repo however many packages it holds. */
+export async function projectRepos(svc: Services): Promise<{ name: string; repo: string }[]> {
+  return (await listRepos(svc)).flatMap((group) => (group.github ? [{ name: group.label, repo: group.github }] : []));
 }
 
 export interface CiEntry {
-  projectId: string;
   name: string;
   repo: string;
+  defaultBranch?: string;
   runs: WorkflowRun[];
   error?: string;
 }
@@ -106,12 +119,38 @@ export interface CiSnapshot {
   updatedAt: string;
 }
 
+/**
+ * Latest run per workflow and branch, for the default branch and branches with an open pull request. Runs of merged
+ * or closed pull requests are history, not status.
+ */
+export function currentRuns(runs: WorkflowRun[], defaultBranch: string | undefined, openBranches: Set<string>) {
+  const seen = new Set<string>();
+  return runs.filter((run) => {
+    const branch = run.head_branch ?? "";
+    if (branch !== defaultBranch && !openBranches.has(branch)) return false;
+    const key = `${run.name ?? ""}\u0000${branch}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export async function refreshCi(svc: Services): Promise<CiSnapshot> {
   const github = await svc.github();
   const entries = await Promise.all(
     (await projectRepos(svc)).map(async (target): Promise<CiEntry> => {
       try {
-        return { ...target, runs: await github.workflowRuns(target.repo) };
+        const [owner = "", name = ""] = target.repo.split("/");
+        const [repo, pulls, runs] = await Promise.all([
+          github.repo(owner, name),
+          github.openPullBranches(target.repo),
+          github.workflowRuns(target.repo),
+        ]);
+        return {
+          ...target,
+          defaultBranch: repo.default_branch,
+          runs: currentRuns(runs, repo.default_branch, new Set(pulls)),
+        };
       } catch (error) {
         return { ...target, runs: [], error: error instanceof Error ? error.message : String(error) };
       }

@@ -1,68 +1,109 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
 import { cn } from "cn";
+import { useEffect, type MouseEvent } from "react";
+import type { HomeSummary } from "@/services/home";
 import { MODULES, type ModuleDef } from "./modules";
 import { useHome } from "./queries";
 
-function badgeFor(
-  id: string,
-  home: ReturnType<typeof useHome>["data"],
-): { count: number; tone: "bad" | "accent" } | undefined {
+type Count = { value: number; tone: "bad" | "warn" | "accent" | "muted"; title: string };
+
+/** Counts only for things worth acting on; a number that is always there turns into wallpaper. */
+function countFor(id: string, home: HomeSummary | undefined): Count | undefined {
   if (!home) return undefined;
-  const value = {
-    projects: { count: home.updates.major + home.updates.minor + home.updates.patch, tone: "accent" as const },
-    security: { count: home.security.failingCi.length, tone: "bad" as const },
-    ci: { count: home.ci.failing.length, tone: "bad" as const },
-    inbox: { count: home.reviewRequests, tone: "accent" as const },
-    bots: { count: home.botPulls, tone: "accent" as const },
-    deploys: { count: home.deploys.failing.length, tone: "bad" as const },
+  const urgent = home.security.bySeverity.critical + home.security.bySeverity.high;
+  const value: Count | undefined = {
+    projects: { value: home.updates.projects, tone: "muted", title: "Projects with updates" } as const,
+    security: urgent
+      ? ({ value: urgent, tone: "bad", title: "High and critical advisories" } as const)
+      : { value: home.security.total, tone: "muted" as const, title: "Advisories" },
+    actions: { value: home.actions.outdated, tone: "muted", title: "Outdated actions" } as const,
+    git: {
+      value: home.git.unpushed + home.git.dirty,
+      tone: "warn",
+      title: "Repos with unpushed or local changes",
+    } as const,
+    inbox: { value: home.reviewRequests, tone: "accent", title: "Review requests" } as const,
+    ci: { value: home.ci.failing.length, tone: "bad", title: "Failing" } as const,
+    bots: { value: home.botPulls, tone: "muted", title: "Open bot PRs" } as const,
+    deploys: { value: home.deploys.failing.length, tone: "bad", title: "Failed deploys" } as const,
   }[id];
-  return value && value.count > 0 ? value : undefined;
+  return value && value.value > 0 ? value : undefined;
 }
 
-function Item({ module, active, badge }: { module: ModuleDef; active: boolean; badge?: ReturnType<typeof badgeFor> }) {
+const COUNT_TONE: Record<Count["tone"], string> = {
+  bad: "bg-bad/15 text-bad",
+  warn: "text-warn",
+  accent: "bg-accent/20 text-accent",
+  muted: "text-faint",
+};
+
+/** Where each section was last left (path and search), so coming back resumes there instead of its root. */
+const lastPlace = new Map<string, string>();
+
+const owns = (m: ModuleDef, pathname: string) => (m.path === "/" ? pathname === "/" : pathname.startsWith(m.path));
+
+function Item({ module, active, count }: { module: ModuleDef; active: boolean; count?: Count }) {
   const Icon = module.icon;
+  const router = useRouter();
+  const navigate = useNavigate();
+  // Elsewhere: resume where this section was left. Already here: a second click goes back to its root.
+  const onClick = (event: MouseEvent) => {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return;
+    event.preventDefault();
+    const resume = lastPlace.get(module.id);
+    if (!active && resume) router.history.push(resume);
+    else void navigate({ to: module.path });
+  };
   return (
     <Link
       to={module.path}
-      title={`${module.title}  (g ${module.key})`}
-      aria-label={module.title}
+      onClick={onClick}
+      title={`${module.title}  (g then ${module.key})`}
       className={cn(
-        "relative flex size-9 items-center justify-center rounded-md transition-colors",
-        active ? "bg-raised text-fg" : "text-muted hover:bg-hover hover:text-fg",
+        "group flex h-7 items-center gap-2.5 rounded-md px-2 text-base transition-colors",
+        active ? "bg-white/[0.07] text-fg" : "text-muted hover:bg-white/[0.04] hover:text-fg",
       )}
     >
-      <Icon className="size-[18px]" strokeWidth={1.5} />
-      {active ? <span className="absolute top-2 bottom-2 -left-2 w-0.5 rounded-full bg-accent" /> : null}
-      {badge ? (
+      <Icon
+        className={cn("size-4 shrink-0", active ? "text-fg" : "text-faint group-hover:text-muted")}
+        strokeWidth={1.5}
+      />
+      <span className="min-w-0 flex-1 truncate">{module.title}</span>
+      {count ? (
         <span
-          className={cn(
-            "absolute top-1 right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full px-1 text-[10px] font-medium tabular",
-            badge.tone === "bad" ? "bg-bad text-black" : "bg-accent text-accent-fg",
-          )}
+          title={count.title}
+          className={cn("rounded px-1.5 text-xs leading-[18px] font-medium tabular", COUNT_TONE[count.tone])}
         >
-          {badge.count > 99 ? "99" : badge.count}
+          {count.value > 999 ? "999+" : count.value}
         </span>
       ) : null}
     </Link>
   );
 }
 
+const GROUP_TITLE = { main: undefined, github: "GitHub", more: "Tools" } as const;
+
 export function Sidebar() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const href = useRouterState({ select: (state) => state.location.href });
   const { data: home } = useHome();
-  const isActive = (m: ModuleDef) => (m.path === "/" ? pathname === "/" : pathname.startsWith(m.path));
-  const groups = (["main", "github", "more"] as const).map((group) => ({
-    group,
-    items: MODULES.filter((m) => m.group === group && m.id !== "settings"),
-  }));
+  const isActive = (m: ModuleDef) => owns(m, pathname);
+
+  useEffect(() => {
+    const current = MODULES.find((m) => owns(m, pathname));
+    if (current) lastPlace.set(current.id, href);
+  }, [pathname, href]);
   const settings = MODULES.find((m) => m.id === "settings");
 
   return (
-    <nav aria-label="Modules" className="flex w-[52px] shrink-0 flex-col items-center gap-1 border-r border-line py-2">
-      {groups.map(({ group, items }, index) => (
-        <div key={group} className={cn("flex flex-col gap-1", index > 0 && "mt-1 border-t border-line pt-2")}>
-          {items.map((m) => (
-            <Item key={m.id} module={m} active={isActive(m)} badge={badgeFor(m.id, home)} />
+    <nav aria-label="Modules" className="flex w-[208px] shrink-0 flex-col gap-4 overflow-y-auto px-2 py-3">
+      {(["main", "github", "more"] as const).map((group) => (
+        <div key={group} className="flex flex-col gap-px">
+          {GROUP_TITLE[group] ? (
+            <span className="px-2 pb-1 text-xs font-medium text-faint">{GROUP_TITLE[group]}</span>
+          ) : null}
+          {MODULES.filter((m) => m.group === group && m.id !== "settings").map((m) => (
+            <Item key={m.id} module={m} active={isActive(m)} count={countFor(m.id, home)} />
           ))}
         </div>
       ))}

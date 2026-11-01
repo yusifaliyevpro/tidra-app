@@ -14,7 +14,6 @@ import { Checkbox } from "@/ui/field";
 import { Empty, ErrorNote, Split } from "@/ui/layout";
 import { Mono } from "@/ui/misc";
 import { toastError } from "@/ui/toast";
-import { UpdateRunDialog } from "./update-run";
 
 const ORDER: Bump[] = ["major", "minor", "patch", "prerelease"];
 const GROUP_LABEL: Record<Bump, string> = {
@@ -27,13 +26,21 @@ const GROUP_LABEL: Record<Bump, string> = {
 
 const keyOf = (entry: OutdatedEntry) => `${entry.name}\u0000${entry.range}\u0000${entry.catalog ?? ""}`;
 
-export function Dependencies({ projectId, path, report }: { projectId: string; path?: string; report: ProjectReport }) {
+/** `onStarted` lives with the page: a finished run refreshes the report, which remounts this list. */
+export function Dependencies({
+  projectId,
+  report,
+  onStarted,
+}: {
+  projectId: string;
+  report: ProjectReport;
+  onStarted: (runId: string) => void;
+}) {
   const svc = useServices();
   const entries = ORDER.flatMap((bump) => report.outdated.filter((e) => e.bump === bump));
   const [selected, setSelected] = useState<string | undefined>(entries[0] ? keyOf(entries[0]) : undefined);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [targets, setTargets] = useState<Record<string, string>>({});
-  const [runId, setRunId] = useState<string>();
 
   const toggle = (key: string) => {
     const next = new Set(picked);
@@ -54,7 +61,7 @@ export function Dependencies({ projectId, path, report }: { projectId: string; p
           .map((entry) => ({ entry, version: targets[keyOf(entry)] ?? entry.latest })),
       ),
     onSuccess: (id) => {
-      setRunId(id);
+      onStarted(id);
       setPicked(new Set());
     },
     onError: toastError,
@@ -180,7 +187,6 @@ export function Dependencies({ projectId, path, report }: { projectId: string; p
           {picked.size > 1 ? `Update ${picked.size} packages` : "Update"}
         </Button>
       </footer>
-      <UpdateRunDialog runId={runId} projectId={projectId} path={path} onClose={() => setRunId(undefined)} />
     </div>
   );
 }

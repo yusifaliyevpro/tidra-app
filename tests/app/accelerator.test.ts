@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acceleratorFromEvent, acceleratorKeys } from "@/app/accelerator";
+import { acceleratorFromEvent, acceleratorKeys, matchesAccelerator } from "@/app/accelerator";
 
 const press = (code: string, mods: { ctrl?: boolean; alt?: boolean; shift?: boolean; meta?: boolean } = {}) =>
   acceleratorFromEvent({
@@ -30,5 +30,24 @@ describe("acceleratorKeys", () => {
   it("shows Ctrl for the cross-platform modifier", () => {
     expect(acceleratorKeys("CommandOrControl+Shift+Space")).toEqual(["Ctrl", "Shift", "Space"]);
     expect(acceleratorKeys("")).toEqual([]);
+  });
+});
+
+const key = (code: string, mods: Partial<KeyboardEvent> = {}) => ({
+  code,
+  ctrlKey: false,
+  metaKey: false,
+  altKey: false,
+  shiftKey: false,
+  ...mods,
+});
+
+describe("matchesAccelerator", () => {
+  it("matches the exact combination only", () => {
+    expect(matchesAccelerator(key("KeyP", { ctrlKey: true }), "CommandOrControl+P")).toBe(true);
+    expect(matchesAccelerator(key("KeyP", { ctrlKey: true, shiftKey: true }), "CommandOrControl+P")).toBe(false);
+    expect(matchesAccelerator(key("KeyP"), "CommandOrControl+P")).toBe(false);
+    expect(matchesAccelerator(key("KeyK", { metaKey: true }), "CmdOrCtrl+K")).toBe(true);
+    expect(matchesAccelerator(key("KeyP", { ctrlKey: true }), "")).toBe(false);
   });
 });

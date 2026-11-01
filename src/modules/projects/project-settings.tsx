@@ -40,7 +40,7 @@ export function ProjectSettings({ project, detectedChecks }: { project: ProjectW
       });
       if (path && path !== project.path) await svc.store.setProjectPath(project.id, path.replaceAll("\\", "/"));
       await queryClient.invalidateQueries({ queryKey: ["project", project.id] });
-      await refreshProject(svc, project.id);
+      await refreshProject(svc, project.id, { force: true });
     },
     onSuccess: () => toast("Saved."),
     onError: toastError,

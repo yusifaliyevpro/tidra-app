@@ -30,11 +30,16 @@ export function Dialog({
   }, [open]);
 
   return (
+    // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions -- Esc already closes it; this adds backdrop clicks
     <dialog
       ref={ref}
       aria-labelledby={titleId}
       onClose={onClose}
       onCancel={onClose}
+      // A click on the backdrop lands on the <dialog> itself; clicks inside land on its content.
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
       className={cn(
         "m-auto max-h-[85vh] w-[520px] max-w-[92vw] rounded-lg border border-line-strong bg-surface p-0 text-fg shadow-2xl backdrop:bg-black/60",
         className,

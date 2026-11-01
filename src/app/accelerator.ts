@@ -64,3 +64,14 @@ export const acceleratorKeys = (accelerator: string) =>
     .split("+")
     .filter(Boolean)
     .map((part) => (part === "CommandOrControl" || part === "CmdOrCtrl" || part === "Control" ? "Ctrl" : part));
+
+/** Opens the command palette; Ctrl+P is free because the webview blocks printing anyway. */
+export const PALETTE_SHORTCUT_SETTING = "paletteShortcut";
+export const DEFAULT_PALETTE_SHORTCUT = "CommandOrControl+P";
+
+/** True when a key press is exactly this accelerator. */
+export const matchesAccelerator = (
+  event: Pick<KeyboardEvent, "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">,
+  accelerator: string,
+) =>
+  Boolean(accelerator) && acceleratorFromEvent(event) === accelerator.replace(/^CmdOrCtrl(?=\+)/, "CommandOrControl");

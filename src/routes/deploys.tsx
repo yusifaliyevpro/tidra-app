@@ -1,24 +1,24 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Rocket } from "lucide-react";
+import { ExternalLink as ExternalLinkIcon, Rocket } from "lucide-react";
 import { useDeploys, useReports } from "@/app/queries";
 import type { DeployState } from "@/integrations/deploy";
 import { JobRefresh } from "@/modules/common";
 import { projectLink } from "@/modules/links";
-import { Badge } from "@/ui/badge";
+import { IconButton } from "@/ui/button";
 import { openExternal } from "@/ui/external";
 import { Card, Empty, ErrorNote, Page } from "@/ui/layout";
 import { TimeAgo } from "@/ui/time";
-import type { Tone } from "@/ui/tone";
 
 export const Route = createFileRoute("/deploys")({ component: Deploys });
 
-const STATE_TONE: Record<DeployState, Tone> = {
-  ready: "ok",
-  building: "warn",
-  queued: "neutral",
-  error: "bad",
-  canceled: "neutral",
+const STATE_DOT: Record<DeployState, string> = {
+  ready: "bg-ok",
+  building: "bg-warn animate-pulse",
+  queued: "bg-faint",
+  error: "bg-bad",
+  canceled: "bg-faint",
 };
+const STATE_ORDER: DeployState[] = ["error", "building", "queued", "ready", "canceled"];
 
 function Deploys() {
   const { data } = useDeploys();
@@ -34,7 +34,7 @@ function Deploys() {
           icon={<Rocket />}
           title="No deploy providers connected"
           action={
-            <Link to="/settings" className="text-accent hover:underline">
+            <Link to="/settings" search={{ section: "deploys" }} className="text-accent hover:underline">
               Connect Vercel, Netlify or Cloudflare
             </Link>
           }
@@ -57,6 +57,7 @@ function Deploys() {
         <Card>
           {(data?.deployments ?? [])
             .filter((d, i, all) => all.findIndex((x) => x.provider === d.provider && x.project === d.project) === i)
+            .toSorted((a, b) => STATE_ORDER.indexOf(a.state) - STATE_ORDER.indexOf(b.state))
             .map((deploy) => {
               const project = deploy.remote ? projectByRemote.get(deploy.remote) : undefined;
               return (
@@ -64,9 +65,9 @@ function Deploys() {
                   key={`${deploy.provider}:${deploy.id}`}
                   className="flex h-11 items-center gap-3 border-b border-line px-4 text-sm last:border-b-0 hover:bg-hover"
                 >
-                  <Badge tone={STATE_TONE[deploy.state]}>{deploy.state}</Badge>
+                  <span title={deploy.state} className={`size-2 shrink-0 rounded-full ${STATE_DOT[deploy.state]}`} />
                   <span className="w-48 truncate font-medium">{deploy.project}</span>
-                  <span className="w-28 text-faint">{deploy.provider}</span>
+                  <span className="w-20 text-xs text-faint">{deploy.provider}</span>
                   <span className="min-w-0 flex-1 truncate text-muted">{deploy.message}</span>
                   {project ? (
                     <Link {...projectLink(project.id)} className="text-faint hover:text-fg">
@@ -78,14 +79,15 @@ function Deploys() {
                     <TimeAgo value={deploy.createdAt} />
                   </span>
                   {deploy.url ? (
-                    <button
-                      type="button"
-                      className="text-accent hover:underline"
+                    <IconButton
+                      size="sm"
+                      label={`Open ${deploy.project}`}
+                      icon={<ExternalLinkIcon className="size-3.5" />}
                       onClick={() => openExternal(deploy.url ?? "")}
-                    >
-                      Open
-                    </button>
-                  ) : null}
+                    />
+                  ) : (
+                    <span className="w-6" />
+                  )}
                 </div>
               );
             })}

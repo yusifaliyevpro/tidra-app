@@ -157,3 +157,48 @@ export function wouldFailCi(
       severityRank(f.severity) >= severityRank(threshold.level),
   );
 }
+
+export interface FindingGroup {
+  /** `name@major`, so one fix (a bump or an override) covers the whole group. */
+  key: string;
+  name: string;
+  versions: string[];
+  severity: Severity;
+  direct: boolean;
+  dev: boolean;
+  /** Highest fixed version across the group's advisories, when every one of them has a fix. */
+  fixedIn?: string;
+  findings: Finding[];
+}
+
+const majorOf = (version: string) => (semver.valid(version) ? String(semver.major(version)) : version);
+
+/** One row per vulnerable package line instead of one per advisory and version; worst first. */
+export function groupFindings(findings: Finding[]): FindingGroup[] {
+  const groups = Map.groupBy(findings, (f) => `${f.name}@${majorOf(f.version)}`);
+  return [...groups]
+    .map(([key, items]): FindingGroup => {
+      const fixes = items.map((f) => f.fixedIn);
+      const allFixed = fixes.every((v): v is string => Boolean(v && semver.valid(v)));
+      return {
+        key,
+        name: items[0]?.name ?? key,
+        versions: [...new Set(items.map((f) => f.version))].toSorted(semver.compareLoose),
+        severity: items.reduce<Severity>(
+          (max, f) => (severityRank(f.severity) > severityRank(max) ? f.severity : max),
+          "low",
+        ),
+        direct: items.some((f) => f.direct),
+        dev: items.every((f) => f.dev),
+        fixedIn: allFixed ? fixes.toSorted(semver.rcompare)[0] : undefined,
+        findings: items.toSorted((a, b) => severityRank(b.severity) - severityRank(a.severity)),
+      };
+    })
+    .toSorted(
+      (a, b) =>
+        severityRank(b.severity) - severityRank(a.severity) ||
+        Number(a.dev) - Number(b.dev) ||
+        b.findings.length - a.findings.length ||
+        a.name.localeCompare(b.name),
+    );
+}

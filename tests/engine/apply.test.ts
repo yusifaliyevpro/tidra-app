@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { commitMessage, planFileChanges, revertUpdate, runUpdate, type Selection } from "@/engine/apply";
+import {
+  commitMessage,
+  planAddCommands,
+  planFileChanges,
+  revertUpdate,
+  runUpdate,
+  type Selection,
+} from "@/engine/apply";
 import type { OutdatedEntry } from "@/engine/outdated";
 import { scriptCommand } from "@/engine/pm";
 import { loadWorkspace } from "@/engine/workspace";
@@ -85,6 +92,67 @@ describe("planFileChanges", () => {
   });
 });
 
+const tiptap = (name: string): Selection => ({
+  entry: entry({ name, range: "3.32.0", usages: [{ importer: ".", field: "dependencies", spec: "3.32.0" }] }),
+  version: "3.32.2",
+});
+
+describe("planAddCommands", () => {
+  it("lets the package manager write each field, keeping range style and exact pins", async () => {
+    const ws = await loadWorkspace(memoryIo({ "/r/package.json": ROOT_PKG, "/r/pnpm-lock.yaml": "" }), "/r");
+    expect(planAddCommands(ws, [react, vite])).toEqual([
+      { importer: ".", command: { program: "pnpm", args: ["add", "react@^19.3.1"] } },
+      { importer: ".", command: { program: "pnpm", args: ["add", "vite@8.3.5", "--save-dev", "--save-exact"] } },
+    ]);
+  });
+
+  it("adds every package of a family that shares one version, not the first one each time", async () => {
+    const pkg =
+      '{"dependencies":{"@tiptap/core":"3.32.0","@tiptap/extension-image":"3.32.0","@tiptap/extension-link":"3.32.0"}}';
+    const ws = await loadWorkspace(memoryIo({ "/r/package.json": pkg, "/r/pnpm-lock.yaml": "" }), "/r");
+    const [add] = planAddCommands(
+      ws,
+      ["@tiptap/core", "@tiptap/extension-image", "@tiptap/extension-link"].map(tiptap),
+    );
+    expect(add?.command.args).toEqual([
+      "add",
+      "@tiptap/core@3.32.2",
+      "@tiptap/extension-image@3.32.2",
+      "@tiptap/extension-link@3.32.2",
+      "--save-exact",
+    ]);
+  });
+
+  it("adds to the workspace root with -w and to packages in their own folder", async () => {
+    const ws = await loadWorkspace(
+      memoryIo({
+        "/r/package.json": '{"devDependencies":{"vite":"8.3.4"}}',
+        "/r/pnpm-workspace.yaml": "packages:\n  - apps/*\n",
+        "/r/apps/web/package.json": '{"name":"web","dependencies":{"react":"^18.3.1"}}',
+      }),
+      "/r",
+    );
+    const webReact: Selection = {
+      ...react,
+      entry: { ...react.entry, usages: [{ importer: "apps/web", field: "dependencies", spec: "^18.3.1" }] },
+    };
+    expect(planAddCommands(ws, [vite, webReact])).toEqual([
+      {
+        importer: ".",
+        command: { program: "pnpm", args: ["add", "vite@8.3.5", "--save-dev", "--save-exact", "--workspace-root"] },
+      },
+      { importer: "apps/web", command: { program: "pnpm", args: ["add", "react@^19.3.1"] } },
+    ]);
+  });
+
+  it("uses each manager's own flags", async () => {
+    const ws = await loadWorkspace(memoryIo({ "/r/package.json": ROOT_PKG, "/r/package-lock.json": "{}" }), "/r");
+    expect(planAddCommands(ws, [vite]).map((a) => a.command.args)).toEqual([
+      ["install", "vite@8.3.5", "--save-dev", "--save-exact"],
+    ]);
+  });
+});
+
 describe("commitMessage", () => {
   it("uses one line for one package and a list for several", () => {
     expect(commitMessage([react])).toBe("chore(deps): bump react 18.3.1 → 19.3.1");
@@ -95,7 +163,7 @@ describe("commitMessage", () => {
 });
 
 describe("runUpdate", () => {
-  it("branches, writes, installs, checks, commits and pushes in order", async () => {
+  it("branches, adds through the package manager, checks, commits and pushes in order", async () => {
     const io = memoryIo(
       { "/r/package.json": ROOT_PKG, "/r/pnpm-lock.yaml": "lockfileVersion: '9.0'\n" },
       { run: gitRunner() },
@@ -115,20 +183,31 @@ describe("runUpdate", () => {
       createdBranch: "tidra/deps-2026-10-31",
       previousBranch: "main",
       commitSha: "abc123",
+      pushed: true,
     });
     expect(result.touched).toEqual(["package.json", "pnpm-lock.yaml"]);
-    expect(io.files.get("/r/package.json")).toContain('"react": "^19.3.1"');
     expect(io.runs.map((r) => [r.program, ...r.args].join(" "))).toEqual([
       "git status --porcelain=v2 --branch",
       "git switch -c tidra/deps-2026-10-31",
-      "pnpm install",
+      "pnpm add react@^19.3.1",
       "pnpm run check",
       "git add -- package.json pnpm-lock.yaml",
       "git commit -m chore(deps): bump react 18.3.1 → 19.3.1",
       "git rev-parse HEAD",
       "git push --set-upstream origin tidra/deps-2026-10-31",
     ]);
-    expect(steps.filter((s) => s.endsWith(":done"))).toHaveLength(7);
+    expect(steps.filter((s) => s.endsWith(":done"))).toHaveLength(6);
+    expect(steps).toContain("write:skipped");
+  });
+
+  it("pushes the update branch it continued on", async () => {
+    const onUpdateBranch = "# branch.oid a\n# branch.head tidra/deps-1\n";
+    const io = memoryIo({ "/r/package.json": ROOT_PKG }, { run: gitRunner(onUpdateBranch) });
+    const ws = await loadWorkspace(io, "/r");
+    const result = await runUpdate(io, ws, [react], { checks: [], commit: true, push: true, continueBranch: true });
+    expect(result.ok).toBe(true);
+    expect(io.runs.some((r) => r.args.join(" ") === "push --set-upstream origin tidra/deps-1")).toBe(true);
+    expect(io.runs.some((r) => r.args[0] === "switch")).toBe(false);
   });
 
   it("refuses a dirty tree unless stashing is allowed", async () => {

@@ -1,5 +1,5 @@
 import { parse as parseJsonc } from "jsonc-parser";
-import { parse as parseYaml } from "yaml";
+import { parseAllDocuments } from "yaml";
 
 export interface LockedPackage {
   name: string;
@@ -29,8 +29,18 @@ function splitKey(key: string): [string, string] {
 
 const stripPeers = (version: string) => version.replace(/\(.*$/, "");
 
+/**
+ * pnpm 11+ may write two YAML documents: the package manager's own lock (`packageManagerDependencies`), then the
+ * project's. The project's is the last one.
+ */
+function pnpmProjectDocument(text: string): Rec {
+  const docs = parseAllDocuments(text);
+  if (!Array.isArray(docs)) return {};
+  return rec(docs.at(-1)?.toJS());
+}
+
 export function parsePnpmLock(text: string): Lockfile {
-  const doc = rec(parseYaml(text));
+  const doc = pnpmProjectDocument(text);
   const importers = rec(doc.importers);
   const snapshots = rec(doc.snapshots ?? doc.packages);
   const versions = new Map<string, Map<string, string>>();

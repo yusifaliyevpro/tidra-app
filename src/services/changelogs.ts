@@ -1,3 +1,4 @@
+import * as z from "@zod/mini";
 import semver from "semver";
 import {
   parseChangelogMarkdown,
@@ -85,13 +86,26 @@ export interface TimelineItem {
 
 const RECENT_DAYS = 45;
 
-/** Recent releases of watched repos and of every dependency in your projects. */
+const WATCHED_PACKAGES_SETTING = "watchedPackages";
+const PackageList = z.array(z.string());
+
+export const readWatchedPackages = (svc: Services) => svc.store.getSetting(WATCHED_PACKAGES_SETTING, PackageList, []);
+
+export async function setPackageWatched(svc: Services, name: string, watched: boolean) {
+  const current = await readWatchedPackages(svc);
+  const next = watched ? [...new Set([...current, name])].toSorted() : current.filter((n) => n !== name);
+  await svc.store.setSetting(WATCHED_PACKAGES_SETTING, next);
+}
+
+/**
+ * Recent releases of what you watch: whole repos, and npm packages (their repo's releases for that package only).
+ * `usage` says which projects use each package, for the "Used by" line.
+ */
 export async function buildTimeline(
   svc: Services,
-  dependencies: { name: string; projects: string[] }[],
+  usage: Map<string, string[]>,
 ): Promise<{ items: TimelineItem[]; errors: string[] }> {
-  const watched = await svc.store.listWatchedRepos();
-  // Per repo: the packages you depend on from it and which projects use each; empty for repos you only watch.
+  const [watched, packages] = await Promise.all([svc.store.listWatchedRepos(), readWatchedPackages(svc)]);
   const targets = new Map<string, { owner: string; repo: string; packages: Map<string, string[]>; watched: boolean }>();
   for (const w of watched)
     targets.set(`${w.owner}/${w.repo}`.toLowerCase(), {
@@ -103,19 +117,17 @@ export async function buildTimeline(
 
   const registry = svc.registry(emptyConfig());
   const repos = await Promise.all(
-    dependencies.map(async (dep) => {
-      const packument = await registry.abbreviated(dep.name).catch(() => null);
-      const latest = packument?.["dist-tags"].latest;
-      const full = latest ? await registry.full(dep.name).catch(() => null) : null;
-      return full ? repoOf(full, latest) : undefined;
+    packages.map(async (name) => {
+      const full = await registry.full(name).catch(() => null);
+      return full ? repoOf(full, full["dist-tags"].latest) : undefined;
     }),
   );
-  dependencies.forEach((dep, i) => {
+  packages.forEach((name, i) => {
     const repo = repos[i];
     if (!repo) return;
     const key = `${repo.owner}/${repo.repo}`.toLowerCase();
     const target = targets.get(key) ?? { owner: repo.owner, repo: repo.repo, packages: new Map(), watched: false };
-    target.packages.set(dep.name, [...(target.packages.get(dep.name) ?? []), ...dep.projects]);
+    target.packages.set(name, usage.get(name) ?? []);
     targets.set(key, target);
   });
 

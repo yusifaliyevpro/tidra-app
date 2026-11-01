@@ -9,13 +9,12 @@ import {
   type UpdateResult,
   type UpdateStep,
 } from "@/engine/apply";
-import { githubSlug } from "@/engine/git";
 import { createLimit } from "@/engine/limit";
 import type { OutdatedEntry } from "@/engine/outdated";
-import type { Bump } from "@/engine/versions";
 import { loadWorkspace } from "@/engine/workspace";
 import type { Services } from "./context";
-import { projectChecks, refreshProject, type ProjectReport } from "./projects";
+import { projectChecks, refreshProject } from "./projects";
+import { openPullRequest, syncPullRequest, updateBranchPlan, UPDATE_BRANCH_PREFIX } from "./pull-requests";
 
 export interface RunProgress {
   runId: string;
@@ -57,7 +56,7 @@ export function branchName(now = new Date()): string {
     .slice(0, 16)
     .replace(/[-:T]/g, "")
     .replace(/^(\d{8})(\d{4})$/, "$1-$2");
-  return `tidra/deps-${stamp}`;
+  return `${UPDATE_BRANCH_PREFIX}${stamp}`;
 }
 
 /** Records the run and returns its id together with a promise for the finished progress. */
@@ -77,8 +76,10 @@ async function launchUpdate(svc: Services, projectId: string, picks: UpdatePick[
   const done = (async () => {
     const workspace = await loadWorkspace(svc.io, path);
     const selections: Selection[] = picks;
+    const plan = await updateBranchPlan(svc, { ...project, path: workspace.root }, branchName());
     const result = await runUpdate(svc.io, workspace, selections, {
-      branch: project.updateOnBranch ? branchName() : undefined,
+      branch: plan.branch,
+      continueBranch: plan.continueBranch,
       checks: projectChecks(project, workspace),
       commit: true,
       push: project.pushAfterCommit || project.openPullRequest,
@@ -93,24 +94,20 @@ async function launchUpdate(svc: Services, projectId: string, picks: UpdatePick[
     });
     progress.result = result;
 
-    if (result.ok && project.openPullRequest && result.createdBranch && project.remote) {
+    if (result.ok && result.pushed && !(project.openPullRequest && result.createdBranch)) {
+      await syncPullRequest(svc, path, project.remote).catch((error: unknown) => {
+        progress.log += `
+Could not update the pull request: ${error instanceof Error ? error.message : String(error)}
+`;
+      });
+    }
+    if (result.ok && project.openPullRequest && (result.createdBranch || plan.continueBranch)) {
       try {
-        const slug = githubSlug(`https://${project.remote}`);
-        const github = await svc.github();
-        if (slug && github.hasToken) {
-          const repo = await github.repo(slug.owner, slug.repo);
-          const pr = await github.createPull(repo.full_name, {
-            title: title.replace("Update", "Bump"),
-            head: result.createdBranch,
-            base: repo.default_branch,
-            body: picks
-              .map((p) => `- \`${p.entry.name}\` ${p.entry.current ?? p.entry.range} → ${p.version}`)
-              .join("\n"),
-          });
-          progress.pullRequestUrl = pr.html_url;
-        }
+        progress.pullRequestUrl = (await openPullRequest(svc, projectId)).url;
       } catch (error) {
-        progress.log += `\nCould not open a pull request: ${error instanceof Error ? error.message : String(error)}\n`;
+        progress.log += `
+Could not open a pull request: ${error instanceof Error ? error.message : String(error)}
+`;
       }
     }
 
@@ -143,18 +140,6 @@ export interface BatchPlan {
   projectId: string;
   name: string;
   picks: UpdatePick[];
-}
-
-/** One plan per project with something to update in the given bump levels, each package going to its latest. */
-export function planBatch(
-  rows: { project: { id: string; name: string; path?: string | null }; report?: ProjectReport | null }[],
-  bumps: ReadonlySet<Bump>,
-): BatchPlan[] {
-  return rows.flatMap(({ project, report }) => {
-    if (!project.path || !report) return [];
-    const picks = report.outdated.filter((e) => bumps.has(e.bump)).map((entry) => ({ entry, version: entry.latest }));
-    return picks.length > 0 ? [{ projectId: project.id, name: project.name, picks }] : [];
-  });
 }
 
 export type BatchItemState = "queued" | "running" | "ok" | "failed";

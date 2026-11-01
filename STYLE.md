@@ -33,7 +33,8 @@ How Tidra code and UI should look. Short version: small, literal, typed, tested,
 - Motion: 120–150ms opacity/transform, respects `prefers-reduced-motion`.
 - **Copy is short and literal.** Sentence case. Buttons are verbs ("Update 3 packages", "Open in VS Code"). No marketing language, no exclamation marks, no "Oops".
 - **No text pollution.** Don't explain what the screen already shows. Empty states are a title ("No workflows"), plus one line only when it tells you what to do. Descriptions under settings are a few words ("Opens in the tray"), not sentences. Prefer no hint over an obvious one.
-- **Not a website.** No hero headers, stat-card dashboards, "Open →" links or cards that only say "all good". Lists and rows, like a native app. When nothing needs attention, say so once ("All clear").
+- **Not a website.** No hero headers, "Open →" links or cards that only say "all good". Lists and rows, like a native app. The one dashboard is Overview: a few tiles with real numbers and thin bars, then tables. When nothing needs attention, say so once ("All clear").
+- **Quiet numbers.** Zeros fade (`text-white/15`) instead of repeating "0 major"; counts sit in fixed columns so rows line up. Sidebar counts appear only when there is something to act on.
 
 ## Native behaviour
 
@@ -42,7 +43,7 @@ How Tidra code and UI should look. Short version: small, literal, typed, tested,
 - No flashes: the window appears after the first painted frame, spinners wait 250 ms, data the first frame needs is prefetched.
 - Settings use `SettingsGroup` + `SettingRow` (`src/modules/settings/rows.tsx`): label left, control right, hairline dividers, one pane per category. Shortcuts are recorded (`ShortcutInput`), never typed as accelerator strings.
 - Destructive actions confirm in a `Dialog` that says what is and isn't affected.
-- Keyboard first: every list supports j/k, Enter, Space to select, Esc; Ctrl+K opens the palette; `g` + a letter jumps to a screen.
+- Keyboard first: every list supports j/k, Enter, Space to select, Esc; Ctrl+P (configurable) opens the palette; `g` + a letter jumps to a screen.
 
 ## Rust
 

@@ -1,21 +1,23 @@
 import { useMutation } from "@tanstack/react-query";
 import { Check, Circle, Code, ExternalLink as ExternalIcon, Minus, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useReport } from "@/app/queries";
 import { useServices } from "@/app/services";
 import { UPDATE_STEPS, type UpdateResult, type UpdateStep } from "@/engine/apply";
 import { revertRun, subscribeRun, type RunProgress } from "@/services/updates";
 import { Button } from "@/ui/button";
 import { Dialog } from "@/ui/dialog";
-import { openExternal } from "@/ui/external";
+import { openExternal, openInVsCode } from "@/ui/external";
 import { ErrorNote } from "@/ui/layout";
 import { Log } from "@/ui/log";
 import { Spinner } from "@/ui/spinner";
 import { toast, toastError } from "@/ui/toast";
+import { BranchActions } from "./branch-actions";
 
 const STEP_LABEL: Record<UpdateStep, string> = {
   preflight: "Check working tree",
   branch: "Create branch",
-  write: "Write manifests",
+  write: "Edit catalog",
   install: "Install",
   checks: "Run checks",
   commit: "Commit",
@@ -81,9 +83,9 @@ export function UpdateRunDialog({
           ))}
         </ol>
         {result?.error ? <ErrorNote>{result.error}</ErrorNote> : null}
-        {result?.ok && result.createdBranch ? (
+        {result?.ok && (result.createdBranch ?? result.previousBranch) ? (
           <p className="text-sm text-muted">
-            Committed on <span className="font-mono text-fg">{result.createdBranch}</span>
+            Committed on <span className="font-mono text-fg">{result.createdBranch ?? result.previousBranch}</span>
             {result.commitSha ? <span className="font-mono"> ({result.commitSha.slice(0, 7)})</span> : null}.
           </p>
         ) : null}
@@ -116,6 +118,7 @@ function RunActions({
     },
     onError: toastError,
   });
+  const { data: report } = useReport(projectId);
   const canRevert = !result.ok && !result.commitSha && result.failedStep !== "preflight";
 
   return (
@@ -126,14 +129,16 @@ function RunActions({
         </Button>
       ) : null}
       {!result.ok && path ? (
-        <Button icon={<Code className="size-4" />} onClick={() => void svc.io.run("code", [path])}>
+        <Button icon={<Code className="size-4" />} onClick={() => openInVsCode(svc.io, path)}>
           Open in VS Code
         </Button>
       ) : null}
       {pullRequestUrl ? (
         <Button icon={<ExternalIcon className="size-4" />} onClick={() => openExternal(pullRequestUrl)}>
-          Open pull request
+          View PR
         </Button>
+      ) : result.ok ? (
+        <BranchActions projectId={projectId} git={report?.git} />
       ) : null}
       <Button variant="primary" onClick={onClose}>
         {result.ok ? "Done" : "Keep changes"}

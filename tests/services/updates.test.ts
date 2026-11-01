@@ -1,35 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { planBatch, startBatch, subscribeBatch, type BatchProgress } from "@/services/updates";
-import { outdatedEntry, projectReport, testServices } from "../support/services";
-
-describe("planBatch", () => {
-  it("keeps projects with updates at the chosen levels and targets latest", () => {
-    const plans = planBatch(
-      [
-        {
-          project: { id: "a", name: "A", path: "/a" },
-          report: projectReport([
-            outdatedEntry("x", "1.0.0", "1.0.1", "patch"),
-            outdatedEntry("y", "1.0.0", "2.0.0", "major"),
-          ]),
-        },
-        {
-          project: { id: "b", name: "B", path: "/b" },
-          report: projectReport([outdatedEntry("z", "1.0.0", "2.0.0", "major")]),
-        },
-        {
-          project: { id: "c", name: "C", path: null },
-          report: projectReport([outdatedEntry("x", "1.0.0", "1.0.1", "patch")]),
-        },
-        { project: { id: "d", name: "D", path: "/d" } },
-      ],
-      new Set(["patch", "minor"]),
-    );
-    expect(plans).toEqual([
-      { projectId: "a", name: "A", picks: [{ entry: expect.objectContaining({ name: "x" }), version: "1.0.1" }] },
-    ]);
-  });
-});
+import { startBatch, subscribeBatch, type BatchProgress } from "@/services/updates";
+import { outdatedEntry, testServices } from "../support/services";
 
 describe("startBatch", () => {
   it("marks projects that cannot start as failed and finishes", async () => {

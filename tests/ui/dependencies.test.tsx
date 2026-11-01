@@ -28,7 +28,7 @@ function renderDeps(outdated: OutdatedEntry[]) {
   return render(
     <QueryClientProvider client={svc.queryClient}>
       <ServicesProvider value={{ svc, processes: createProcessManager(svc) }}>
-        <Dependencies projectId="p1" path="/repo" report={projectReport(outdated)} />
+        <Dependencies projectId="p1" report={projectReport(outdated)} onStarted={() => undefined} />
       </ServicesProvider>
     </QueryClientProvider>,
   );
