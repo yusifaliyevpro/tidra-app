@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import * as z from "@zod/mini";
-import { ArrowLeft, Code, FolderOpen, Play, RefreshCw } from "lucide-react";
+import { ArrowLeft, FolderOpen, Play, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { useProject, useReport } from "@/app/queries";
 import { useApp } from "@/app/services";
@@ -26,6 +26,7 @@ import { Mono, Tabs } from "@/ui/misc";
 import { Spinner } from "@/ui/spinner";
 import { TimeAgo } from "@/ui/time";
 import { toastError } from "@/ui/toast";
+import { VsCodeIcon } from "@/ui/vscode-icon";
 
 type Tab = (typeof TABS)[number];
 
@@ -122,7 +123,7 @@ function ProjectActions({ project, report }: { project: Project; report: Report 
       {path ? (
         <IconButton
           label="Open in VS Code"
-          icon={<Code className="size-4" />}
+          icon={<VsCodeIcon className="size-3.5" />}
           onClick={() => openInVsCode(svc.io, path)}
         />
       ) : null}

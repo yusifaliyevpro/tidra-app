@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { ArrowDown, ArrowUp, Code, Download, FolderOpen, GitFork } from "lucide-react";
+import { ArrowDown, ArrowUp, Download, FolderOpen, GitFork } from "lucide-react";
 import { useRepos } from "@/app/queries";
 import { useServices } from "@/app/services";
 import { inTauri } from "@/core/native";
@@ -12,6 +12,7 @@ import { Button, IconButton } from "@/ui/button";
 import { openExternal, openFolder, openInVsCode } from "@/ui/external";
 import { Empty, Page } from "@/ui/layout";
 import { toast, toastError } from "@/ui/toast";
+import { VsCodeIcon } from "@/ui/vscode-icon";
 
 export const Route = createFileRoute("/git")({ component: GitOverview });
 
@@ -152,7 +153,7 @@ function RepoRow({ repo }: { repo: RepoGroup }) {
             <IconButton
               size="sm"
               label="Open in VS Code"
-              icon={<Code className="size-3.5" />}
+              icon={<VsCodeIcon className="size-3" />}
               onClick={() => openInVsCode(svc.io, root)}
             />
           ) : null}
