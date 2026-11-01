@@ -117,14 +117,14 @@ Done:
 - The sidebar resumes each section where it was left (the project tab is in the URL); clicking the current section again goes to its root
 - Native feel pass, flash fixes, copy pass
 - CI and release workflows, updater signing via `.env.local`
+- v0.1.0 released through `release.yml` with signed installers for Windows, macOS and Linux
+- Signed installer used day to day: update → checks → commit, push and PR verified on real repos
+- README screenshot
 
 Open:
 
-- [ ] Full end-to-end run of the real app on throwaway repos: update → checks → commit, revert, push and PR, notifications, tray, hotkey, autostart
-- [ ] Install a signed `pnpm build` and confirm a cold start shows no flash and closing hides to the tray
-- [ ] First release through `release.yml` (bump `package.json`), then check the in-app updater against it
-- [ ] Sync between two devices against a real Turso and Supabase database
-- [ ] README screenshots
+- [ ] In-app updater against a real update: needs the repo to be public (private releases can't be downloaded by installed apps) and a 0.1.1 release; v0.1.0's `latest.json` is verified
+- [ ] Sync on a second device, and against Supabase: Turso is connected and syncing on the first device
 
 ## Releasing
 
