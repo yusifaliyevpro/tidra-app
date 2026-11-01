@@ -4,7 +4,7 @@ import * as z from "@zod/mini";
 import { ArrowLeft, FolderOpen, Play, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { useProject, useReport } from "@/app/queries";
-import { useApp } from "@/app/services";
+import { useApp, useServices } from "@/app/services";
 import { inTauri } from "@/core/native";
 import { scriptCommand } from "@/engine/pm";
 import { ProcessDialog, useProcessList } from "@/modules/process-dialog";
@@ -14,7 +14,7 @@ import { Dependencies } from "@/modules/projects/dependencies";
 import { ProjectSettings } from "@/modules/projects/project-settings";
 import { SyncButton } from "@/modules/projects/sync-button";
 import { UpdateRunDialog } from "@/modules/projects/update-run";
-import { refreshProject } from "@/services/projects";
+import { fetchProject, refreshProject } from "@/services/projects";
 import { listRuns } from "@/services/updates";
 import { Badge } from "@/ui/badge";
 import { Button, IconButton } from "@/ui/button";
@@ -44,6 +44,14 @@ function ProjectPage() {
   const { projectId } = Route.useParams();
   const { data: project, isPending } = useProject(projectId);
   const { data: report } = useReport(projectId);
+  const svc = useServices();
+  // Opening a project fetches its repo in the background (at most every few minutes) so Sync counts are current.
+  useQuery({
+    queryKey: ["fetch", projectId],
+    queryFn: () => fetchProject(svc, projectId),
+    enabled: !svc.preview,
+    staleTime: 5 * 60_000,
+  });
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   // The tab lives in the URL, so leaving and coming back (or the sidebar) restores it.

@@ -1,7 +1,7 @@
 import { repoLabel } from "@/engine/discover";
 import { createGit, githubSlug } from "@/engine/git";
 import type { Services } from "./context";
-import { readAllReports, refreshProject, type GitInfoCache, type ProjectReport } from "./projects";
+import { fetchProject, readAllReports, refreshProject, type GitInfoCache, type ProjectReport } from "./projects";
 
 export interface RepoGroup {
   /** Normalized remote, or the checkout folder for local-only repos. */
@@ -101,6 +101,10 @@ export async function switchBranch(
   const gitCache: GitInfoCache = new Map();
   await Promise.all(repo.projects.map((p) => refreshProject(svc, p.id, { gitCache })));
   svc.invalidate(["branch-pull"], ["branches"]);
+  // The switch shows at once; the fetch then fills in what the new branch is missing from its remote.
+  void fetchProject(svc, projectId, { force: true })
+    .then(() => svc.invalidate(["branch-pull"]))
+    .catch(() => undefined);
 }
 
 /**

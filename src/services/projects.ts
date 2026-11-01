@@ -208,26 +208,44 @@ export async function refreshAllProjects(svc: Services, signal?: AbortSignal): P
 }
 
 const FETCH_TIMEOUT_MS = 20_000;
+const FETCH_FRESH_MS = 5 * 60_000;
+/** When each checkout was last fetched this session, so opening a project doesn't refetch every time. */
+const lastFetched = new Map<string, number>();
+
+const checkoutRoot = (p: ProjectWithPath) => (p.path && p.subdir ? p.path.slice(0, -(p.subdir.length + 1)) : p.path);
+
+/** One quiet `git fetch` with a time limit; a slow or unreachable remote never blocks anything. */
+async function fetchCheckout(svc: Services, root: string, signal?: AbortSignal) {
+  const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+  await createGit(svc.io, root)
+    .raw(["fetch", "--all", "--prune", "--quiet"], { signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
+    .catch(() => undefined);
+  lastFetched.set(root, Date.now());
+}
 
 /** Keeps ahead/behind counts (and the Sync button) current; one quiet fetch per checkout, failures ignored. */
 async function fetchCheckouts(svc: Services, projects: ProjectWithPath[], signal?: AbortSignal) {
-  const roots = new Set(
-    projects.flatMap((p) => (p.path && p.remote ? [p.subdir ? p.path.slice(0, -(p.subdir.length + 1)) : p.path] : [])),
-  );
+  const roots = new Set(projects.flatMap((p) => (p.remote ? [checkoutRoot(p) ?? ""] : [])).filter(Boolean));
   const limit = createLimit(4);
   await Promise.all(
-    [...roots].map((root) =>
-      limit(async () => {
-        if (signal?.aborted) return;
-        const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
-        await createGit(svc.io, root)
-          .raw(["fetch", "--all", "--prune", "--quiet"], {
-            signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-          })
-          .catch(() => undefined);
-      }),
-    ),
+    [...roots].map((root) => limit(async () => (signal?.aborted ? undefined : fetchCheckout(svc, root, signal)))),
   );
+}
+
+/**
+ * Fetches the project's checkout, then refreshes every package in it, so commits waiting upstream show as a Sync
+ * count. Skipped when it was fetched in the last few minutes unless `force`. Returns whether it fetched.
+ */
+export async function fetchProject(svc: Services, projectId: string, options: { force?: boolean } = {}) {
+  const project = await svc.store.getProject(projectId);
+  const root = project ? checkoutRoot(project) : undefined;
+  if (!project?.remote || !root) return false;
+  if (!options.force && Date.now() - (lastFetched.get(root) ?? 0) < FETCH_FRESH_MS) return false;
+  await fetchCheckout(svc, root);
+  const members = (await svc.store.listProjects()).filter((p) => checkoutRoot(p) === root);
+  const gitCache: GitInfoCache = new Map();
+  await Promise.all(members.map((p) => refreshProject(svc, p.id, { gitCache })));
+  return true;
 }
 
 export async function readAllReports(svc: Services): Promise<{ project: ProjectWithPath; report?: ProjectReport }[]> {

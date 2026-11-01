@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { fetchProject } from "@/services/projects";
 import { listBranches, switchBranch, syncRepo } from "@/services/repos";
 import { memoryIo, ok } from "../support/memory-io";
 import { testServices } from "../support/services";
@@ -39,6 +40,7 @@ describe("switchBranch", () => {
     const { io, svc, close } = await withProject();
     await switchBranch(svc, "p1", "feature/b");
     await switchBranch(svc, "p1", "fix/new", { create: true });
+    await new Promise((resolve) => setTimeout(resolve, 20));
     close();
     const switches = io.runs.filter((r) => r.args[0] === "switch").map((r) => [r.args.join(" "), r.cwd]);
     expect(switches).toEqual([
@@ -77,6 +79,25 @@ async function runSync(statuses: ReturnType<typeof ok>[], upstreamRemote?: strin
   const gitCalls = io.runs.map((r) => r.args.join(" ")).filter((line) => /^(fetch|merge|pull|push)/.test(line));
   return { message, gitCalls };
 }
+
+describe("fetchProject", () => {
+  it("fetches after a branch switch so commits waiting upstream show up", async () => {
+    const { io, svc, close } = await withProject();
+    await switchBranch(svc, "p1", "feature/b");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    close();
+    const lines = io.runs.map((r) => r.args.join(" "));
+    expect(lines.indexOf("fetch --all --prune --quiet")).toBeGreaterThan(lines.indexOf("switch feature/b"));
+  });
+
+  it("skips a checkout fetched in the last few minutes unless forced", async () => {
+    const { io, svc, close } = await withProject();
+    expect(await fetchProject(svc, "p1", { force: true })).toBe(true);
+    expect(await fetchProject(svc, "p1")).toBe(false);
+    close();
+    expect(io.runs.filter((r) => r.args[0] === "fetch")).toHaveLength(1);
+  });
+});
 
 describe("syncRepo", () => {
   it("pulls what origin has, then pushes what it lacks", async () => {
