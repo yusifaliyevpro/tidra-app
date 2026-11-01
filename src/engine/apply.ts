@@ -144,6 +144,8 @@ export interface UpdateResult {
   createdBranch?: string;
   commitSha?: string;
   pushed?: boolean;
+  /** The commit message this update uses, kept so a run stopped by its checks can still be committed later. */
+  message?: string;
   changes: FileChange[];
   /** Files the update touched, relative to the project root, for revert. */
   touched: string[];
@@ -166,7 +168,7 @@ export async function runUpdate(
 ): Promise<UpdateResult> {
   const git = createGit(io, workspace.root);
   const changes = planFileChanges(workspace, selections);
-  const result: UpdateResult = { ok: false, changes, touched: [] };
+  const result: UpdateResult = { ok: false, changes, touched: [], message: commitMessage(selections) };
   let step: UpdateStep = "preflight";
 
   const exec = async (command: Command, cwd = workspace.root) => {
@@ -237,7 +239,7 @@ export async function runUpdate(
     if (options.commit) {
       begin("commit");
       await git.add(result.touched);
-      await git.commit(commitMessage(selections));
+      await git.commit(result.message ?? commitMessage(selections));
       result.commitSha = await git.headSha();
       done();
     } else skip("commit");

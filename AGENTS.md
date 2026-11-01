@@ -110,6 +110,8 @@ Done:
 - All screens: Overview (dashboard: totals, needs-attention table, recent updates, releases, background checks), Projects (filters, branch switcher, grouped by repo), project page, Changelogs, Security (per package), Actions (collapsible per repo), Git, Pull requests, CI, Bot PRs (read-only list), Deploys, My packages, Toolchain, Scripts and ports, Settings (Windows 11 style panes, shortcut recorder, delete all data), onboarding
 - Dependency search lives in the palette (Ctrl+P by default, set in Settings): type a package to see where it is used and update it everywhere
 - Push and open a PR from Tidra (`BranchActions`); merging stays on GitHub, the app never merges
+- An update stopped by its checks leaves changes uncommitted; "Commit & Push" (menu: Commit, Push) commits everything with that run's message (`commitProject`), so nothing is pushed half-done
+- Actions updates commit on a `tidra/actions-<date>` branch cut from the default branch (never the current branch); each repo with outdated actions can copy a prompt for a coding agent (`actionsUpdatePrompt`)
 - Sync (`syncRepo`, `SyncButton`): fetch, fast-forward a fork's default branch to `upstream`, pull, push; never merges or rebases on its own
 - Scripts runs any project's scripts; starting one from a project page or Toolchain opens its live output in a dialog there
 - The sidebar resumes each section where it was left (the project tab is in the URL); clicking the current section again goes to its root

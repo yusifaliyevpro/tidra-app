@@ -1,3 +1,5 @@
+import { eq } from "drizzle-orm";
+import { runs } from "@/core/db/schema";
 import { createGit, githubSlug, isClean, type GitStatus } from "@/engine/git";
 import { nextPullTitle, pullBody, pullTitle } from "@/engine/pull-request";
 import type { Services } from "./context";
@@ -7,10 +9,53 @@ import { listRepos } from "./repos";
 export const UPDATE_BRANCH_PREFIX = "tidra/deps-";
 
 export const isUpdateBranch = (branch: string | undefined) => Boolean(branch?.startsWith(UPDATE_BRANCH_PREFIX));
+export const ACTIONS_BRANCH_PREFIX = "tidra/actions-";
+
+/** Any branch Tidra created (dependency or Actions updates): these get Push and Open PR buttons. */
+export const isTidraBranch = (branch: string | undefined) => Boolean(branch?.startsWith("tidra/"));
 
 /** Commits the remote doesn't have: ahead of upstream, or an update branch that was never pushed. */
 export const hasUnpushed = (git: GitStatus | undefined) =>
-  Boolean(git?.branch) && ((git?.ahead ?? 0) > 0 || (!git?.upstream && isUpdateBranch(git?.branch)));
+  Boolean(git?.branch) && ((git?.ahead ?? 0) > 0 || (!git?.upstream && isTidraBranch(git?.branch)));
+
+/**
+ * Commits everything uncommitted in the project's checkout. The message comes from the latest update run that
+ * stopped before committing (say, at its checks), so the commit reads as if the update had finished.
+ */
+export async function commitProject(svc: Services, projectId: string): Promise<string> {
+  const project = await svc.store.getProject(projectId);
+  if (!project?.path) throw new Error("This project has no folder on this device.");
+  const root = project.subdir ? project.path.slice(0, -(project.subdir.length + 1)) : project.path;
+  const git = createGit(svc.io, root);
+  const status = await git.status();
+  if (isClean(status)) throw new Error("There is nothing to commit.");
+  const message = (await pendingRunMessage(svc, projectId)) ?? "chore(deps): update dependencies";
+  await git.run(["add", "--all"]);
+  await git.commit(message);
+  const members = (await listRepos(svc)).find((r) => r.projects.some((p) => p.id === projectId))?.projects ?? [];
+  const gitCache: GitInfoCache = new Map();
+  await Promise.all(members.map((p) => refreshProject(svc, p.id, { gitCache })));
+  return message.split("\n")[0] ?? message;
+}
+
+async function pendingRunMessage(svc: Services, projectId: string): Promise<string | undefined> {
+  const [latest] = await svc.store.db.query.runs.findMany({
+    where: eq(runs.projectId, projectId),
+    orderBy: (table, { desc }) => desc(table.startedAt),
+    limit: 1,
+  });
+  const result = latest?.result;
+  if (!result || typeof result !== "object") return undefined;
+  const { message, commitSha } = result as { message?: unknown; commitSha?: unknown };
+  return typeof message === "string" && !commitSha ? message : undefined;
+}
+
+/** Commit, then push: the one-click way out of an update that stopped at its checks. */
+export async function commitAndPushProject(svc: Services, projectId: string): Promise<string> {
+  const message = await commitProject(svc, projectId);
+  const branch = await pushProject(svc, projectId);
+  return `Committed "${message}" and pushed ${branch}.`;
+}
 
 /** Pushes the current branch to origin, setting it as upstream, whatever the project's push setting says. */
 export async function pushProject(svc: Services, projectId: string): Promise<string> {

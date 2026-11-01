@@ -1,10 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpFromLine, ExternalLink, GitPullRequestArrow } from "lucide-react";
+import { cn } from "cn";
+import { ArrowUpFromLine, ChevronDown, ExternalLink, GitCommitHorizontal, GitPullRequestArrow } from "lucide-react";
 import { useServices } from "@/app/services";
 import type { GitStatus } from "@/engine/git";
-import { branchPull, hasUnpushed, isUpdateBranch, openPullRequest, pushProject } from "@/services/pull-requests";
+import {
+  branchPull,
+  commitAndPushProject,
+  commitProject,
+  hasUnpushed,
+  isTidraBranch,
+  openPullRequest,
+  pushProject,
+} from "@/services/pull-requests";
 import { Button } from "@/ui/button";
 import { openExternal } from "@/ui/external";
+import { MenuItem, Popover } from "@/ui/popover";
+import { Spinner } from "@/ui/spinner";
 import { toast, toastError } from "@/ui/toast";
 
 type Size = "sm" | undefined;
@@ -22,47 +33,164 @@ const only = (action: () => void) => (event: { preventDefault(): void; stopPropa
  * What can be done with the current branch, without leaving Tidra: push unpushed commits, open its pull request,
  * and once one is open, link to it.
  */
+function branchState(git: GitStatus | undefined, allowCommit: boolean | undefined) {
+  const branch = git?.branch;
+  const updateBranch = isTidraBranch(branch);
+  return {
+    branch,
+    updateBranch,
+    featureBranch: Boolean(branch && git?.upstream && !["main", "master", "develop"].includes(branch)),
+    // A tracked branch is pushed by Sync; Push is only for publishing a branch the first time.
+    unpushed: hasUnpushed(git) && !git?.upstream,
+    // An update stopped by its checks leaves its changes uncommitted; pushing alone would send nothing.
+    canCommit: (git ? git.changed + git.untracked : 0) > 0 && (updateBranch || Boolean(allowCommit)),
+  };
+}
+
 export function BranchActions({
   projectId,
   git,
   size,
+  allowCommit,
 }: {
   projectId: string;
   git: GitStatus | undefined;
   size?: Size;
+  /** Offer Commit for uncommitted changes on any branch, not only Tidra's own (used right after a stopped update). */
+  allowCommit?: boolean;
 }) {
   const svc = useServices();
-  const branch = git?.branch;
-  const updateBranch = isUpdateBranch(branch);
-  const featureBranch = Boolean(branch && git?.upstream && !["main", "master", "develop"].includes(branch));
+  const { branch, updateBranch, featureBranch, unpushed, canCommit } = branchState(git, allowCommit);
   const { data: pull } = useQuery({
     queryKey: ["branch-pull", projectId, branch],
     enabled: (updateBranch || featureBranch) && !svc.preview,
     staleTime: 60_000,
     queryFn: () => (branch ? branchPull(svc, projectId, branch) : { state: "none" as const }),
   });
-  // A tracked branch is pushed by Sync; Push is only for publishing a branch the first time.
-  const unpushed = hasUnpushed(git) && !git?.upstream;
   const open = pull?.state === "open" ? pull : undefined;
-  if (!unpushed && !open && !(updateBranch && pull)) return null;
+  if (!canCommit && !unpushed && !open && !(updateBranch && pull)) return null;
   return (
     <span className="flex gap-1.5">
-      {unpushed ? <PushButton projectId={projectId} size={size} primary={Boolean(open)} /> : null}
+      <LocalWork projectId={projectId} size={size} canCommit={canCommit} unpushed={unpushed} hasPull={Boolean(open)} />
       {open?.url ? (
-        <>
-          <Button
-            size={size}
-            variant="ghost"
-            icon={<ExternalLink className={iconClass(size)} />}
-            title={open.title}
-            onClick={only(() => open.url && openExternal(open.url))}
-          >
-            #{open.number}
-          </Button>
-        </>
+        <PullLink url={open.url} number={open.number} title={open.title} size={size} />
       ) : updateBranch && pull ? (
         <OpenPullRequestButton projectId={projectId} size={size} />
       ) : null}
+    </span>
+  );
+}
+
+function LocalWork({
+  projectId,
+  size,
+  canCommit,
+  unpushed,
+  hasPull,
+}: {
+  projectId: string;
+  size: Size;
+  canCommit: boolean;
+  unpushed: boolean;
+  hasPull: boolean;
+}) {
+  if (canCommit) return <CommitPushButton projectId={projectId} size={size} />;
+  return unpushed ? <PushButton projectId={projectId} size={size} primary={hasPull} /> : null;
+}
+
+function PullLink({ url, number, title, size }: { url: string; number?: number; title?: string; size: Size }) {
+  return (
+    <Button
+      size={size}
+      variant="ghost"
+      icon={<ExternalLink className={iconClass(size)} />}
+      title={title}
+      onClick={only(() => openExternal(url))}
+    >
+      #{number}
+    </Button>
+  );
+}
+
+type CommitAction = "commit-push" | "commit" | "push";
+
+/** "Commit & Push" with a menu for doing just one of the two. */
+function CommitPushButton({ projectId, size }: { projectId: string; size: Size }) {
+  const svc = useServices();
+  const queryClient = useQueryClient();
+  const action = useMutation({
+    mutationFn: async (kind: CommitAction) => {
+      if (kind === "commit") return `Committed "${await commitProject(svc, projectId)}".`;
+      if (kind === "push") return `Pushed ${await pushProject(svc, projectId)}.`;
+      return commitAndPushProject(svc, projectId);
+    },
+    onSuccess: async (message) => {
+      toast(message);
+      await queryClient.invalidateQueries({ queryKey: ["branch-pull"] });
+    },
+    onError: toastError,
+  });
+  return (
+    <span className="flex">
+      <Button
+        size={size}
+        variant="primary"
+        className="rounded-r-none"
+        icon={<GitCommitHorizontal className={iconClass(size)} />}
+        loading={action.isPending && action.variables === "commit-push"}
+        disabled={action.isPending}
+        onClick={only(() => action.mutate("commit-push"))}
+      >
+        Commit & Push
+      </Button>
+      <Popover
+        align="end"
+        className="w-40 p-1"
+        renderTrigger={({ open, toggle }) => (
+          <Button
+            size={size}
+            variant="primary"
+            aria-label="More commit options"
+            aria-expanded={open}
+            disabled={action.isPending}
+            className={cn("rounded-l-none border-l border-black/25 px-1.5", open && "brightness-110")}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              toggle(event);
+            }}
+          >
+            {action.isPending && action.variables !== "commit-push" ? (
+              <Spinner className="size-3.5" />
+            ) : (
+              <ChevronDown className={iconClass(size)} />
+            )}
+          </Button>
+        )}
+      >
+        {(close) => (
+          <>
+            <MenuItem
+              onSelect={() => {
+                close();
+                action.mutate("commit");
+              }}
+            >
+              <GitCommitHorizontal className="size-3.5" />
+              Commit
+            </MenuItem>
+            <MenuItem
+              onSelect={() => {
+                close();
+                action.mutate("push");
+              }}
+            >
+              <ArrowUpFromLine className="size-3.5" />
+              Push
+            </MenuItem>
+          </>
+        )}
+      </Popover>
     </span>
   );
 }
