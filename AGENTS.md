@@ -95,6 +95,8 @@ Rules:
 
 ## Testing conventions
 
+- **Bugs are test-first.** When a bug is reported or found, first write a test that reproduces it and watch it fail, then fix the code until it passes. The test stays as the regression test.
+- **Features are code-first.** For a new feature, build it, then write tests that cover its behaviour before calling it done.
 - Tests live in `tests/`, mirroring `src/` (`tests/engine/spec.test.ts` for `src/engine/spec.ts`). No tests inside `src`.
 - `*.test.ts` → node env; `*.test.tsx` → jsdom with Testing Library.
 - Engine tests use an in-memory `Io` (`tests/support/memory-io.ts`) and real-shaped fixtures (lockfiles, manifests, registry documents).
