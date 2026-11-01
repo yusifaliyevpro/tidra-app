@@ -33,10 +33,13 @@ function WindowButton({
 export function Titlebar({
   onSearch,
   searchShortcut = "",
+  besideSearch,
   tools,
 }: {
   onSearch?: () => void;
   searchShortcut?: string;
+  /** Sits right of the search box, e.g. the app update button. */
+  besideSearch?: ReactNode;
   tools?: ReactNode;
 }) {
   const win = inTauri ? getCurrentWindow() : undefined;
@@ -49,11 +52,11 @@ export function Titlebar({
         </span>
       </div>
       {onSearch ? (
-        <div className="flex flex-1 justify-center self-stretch" data-tauri-drag-region>
+        <div className="flex flex-1 items-center justify-center gap-2 self-stretch" data-tauri-drag-region>
           <button
             type="button"
             onClick={onSearch}
-            className="my-auto flex h-7 w-full max-w-[440px] items-center gap-2 rounded-md border border-line bg-white/[0.03] px-2.5 text-sm text-faint transition-colors no-drag hover:border-line-strong hover:text-muted"
+            className="flex h-7 w-full max-w-[440px] items-center gap-2 rounded-md border border-line bg-white/[0.03] px-2.5 text-sm text-faint transition-colors no-drag hover:border-line-strong hover:text-muted"
           >
             <Search className="size-3.5" />
             <span>Search projects, packages and commands</span>
@@ -63,6 +66,7 @@ export function Titlebar({
               ))}
             </span>
           </button>
+          {besideSearch}
         </div>
       ) : (
         <div className="flex-1 self-stretch" data-tauri-drag-region />

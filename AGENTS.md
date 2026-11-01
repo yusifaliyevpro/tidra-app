@@ -120,6 +120,7 @@ Done:
 - v0.1.0 released through `release.yml` with signed installers for Windows, macOS and Linux
 - Signed installer used day to day: update → checks → commit, push and PR verified on real repos
 - README screenshot
+- Background update check at launch and every 6 h (`src/app/app-update.tsx`); failures stay silent, a found update shows "Update to x.y.z" beside the search box
 
 Open:
 

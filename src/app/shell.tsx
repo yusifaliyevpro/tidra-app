@@ -6,6 +6,7 @@ import { handleMarkdownLinkClick } from "@/ui/external";
 import { Toaster } from "@/ui/toaster";
 import { DEFAULT_PALETTE_SHORTCUT, PALETTE_SHORTCUT_SETTING } from "./accelerator";
 import { Activity } from "./activity";
+import { AppUpdateButton } from "./app-update";
 import { NotificationBell } from "./notifications";
 import { Palette } from "./palette";
 import { useSetting } from "./queries";
@@ -36,6 +37,11 @@ export function Shell() {
       <Titlebar
         onSearch={openPalette}
         searchShortcut={paletteKey}
+        besideSearch={
+          <ErrorBoundary fallback={quiet}>
+            <AppUpdateButton />
+          </ErrorBoundary>
+        }
         tools={
           <ErrorBoundary fallback={quiet}>
             <Activity />
