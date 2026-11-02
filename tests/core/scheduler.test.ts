@@ -22,6 +22,18 @@ describe("scheduler", () => {
     scheduler.stop();
   });
 
+  it("hands out snapshots that a finished run never changes in place", async () => {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    const scheduler = createScheduler({ random: () => 0 });
+    scheduler.register({ id: "projects", title: "Projects", intervalMinutes: 30, run: () => promise });
+    const running = scheduler.runNow("projects");
+    const during = scheduler.states();
+    resolve();
+    await running;
+    expect(during[0]?.running).toBe(true);
+    expect(scheduler.states()[0]?.running).toBe(false);
+  });
+
   it("backs off after failures and records the error", async () => {
     const run = vi.fn<() => Promise<void>>().mockRejectedValue(new Error("rate limited"));
     const scheduler = createScheduler({ random: () => 0, tickMs: 1000 });

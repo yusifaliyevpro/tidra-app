@@ -42,7 +42,9 @@ export function createScheduler(options: SchedulerOptions = {}) {
   let timer: ReturnType<typeof setInterval> | undefined;
   let paused = false;
 
-  const emit = () => options.onChange?.([...states.values()]);
+  // Copies, because query caching and the React Compiler treat an unchanged reference as unchanged state.
+  const snapshot = () => [...states.values()].map((state) => ({ ...state }));
+  const emit = () => options.onChange?.(snapshot());
   const delayFor = (job: Job, failures: number) => {
     const base = job.intervalMinutes * 60_000 * Math.min(2 ** failures, MAX_BACKOFF);
     return base + Math.floor(random() * base * jitter);
@@ -123,7 +125,7 @@ export function createScheduler(options: SchedulerOptions = {}) {
     async runAll() {
       await Promise.all([...jobs.values()].map(execute));
     },
-    states: () => [...states.values()],
+    states: snapshot,
   };
 }
 
