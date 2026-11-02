@@ -23,6 +23,8 @@
 
 Tidra watches the projects on your machine and tells you what needs attention: outdated dependencies, what changed upstream, security advisories, failing CI, pull requests waiting for you, and broken deploys. When it's time to update, it edits your manifests, installs and runs your checks, then you review and commit with one click, without opening an editor.
 
+The name comes from _tide_: the steady stream of upstream releases your projects have to keep up with. The logo is the two version range symbols from `package.json`: the `^` (caret) on top and the `~` (tilde) wave below.
+
 <p align="center">
   <img src="assets/overview.png" alt="Tidra overview: outdated packages, advisories, CI and pull requests across every project" />
 </p>
