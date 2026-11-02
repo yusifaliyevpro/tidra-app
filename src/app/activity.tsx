@@ -20,13 +20,13 @@ export function Activity() {
   const [first] = running;
   return (
     <span
-      className="flex items-center gap-2 px-2 text-xs text-faint"
+      className="flex min-w-0 items-center gap-2 px-2 text-xs text-faint"
       title={running.map((j) => j.title).join("\n")}
       aria-live="polite"
     >
-      <Spinner className="size-3" />
-      <span className="max-w-48 truncate">{first?.title}</span>
-      {running.length > 1 ? <span className="tabular">+{running.length - 1}</span> : null}
+      <Spinner className="size-3 shrink-0" />
+      <span className="max-w-48 min-w-0 truncate">{first?.title}</span>
+      {running.length > 1 ? <span className="shrink-0 tabular">+{running.length - 1}</span> : null}
     </span>
   );
 }
