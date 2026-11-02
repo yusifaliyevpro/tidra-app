@@ -14,14 +14,13 @@ import type { OutdatedEntry } from "@/engine/outdated";
 import { loadWorkspace } from "@/engine/workspace";
 import type { Services } from "./context";
 import { projectChecks, refreshProject } from "./projects";
-import { openPullRequest, syncPullRequest, updateBranchPlan, UPDATE_BRANCH_PREFIX } from "./pull-requests";
+import { updateBranchPlan, UPDATE_BRANCH_PREFIX } from "./pull-requests";
 
 export interface RunProgress {
   runId: string;
   steps: Partial<Record<UpdateStep, { state: StepState; detail?: string }>>;
   log: string;
   result?: UpdateResult;
-  pullRequestUrl?: string;
 }
 
 export type UpdatePick = { entry: OutdatedEntry; version: string };
@@ -79,10 +78,8 @@ async function launchUpdate(svc: Services, projectId: string, picks: UpdatePick[
     const plan = await updateBranchPlan(svc, { ...project, path: workspace.root }, branchName());
     const result = await runUpdate(svc.io, workspace, selections, {
       branch: plan.branch,
-      continueBranch: plan.continueBranch,
       checks: projectChecks(project, workspace),
       commit: true,
-      push: project.pushAfterCommit || project.openPullRequest,
       onStep: (step, state, detail) => {
         progress.steps[step] = { state, detail };
         emitRun(progress);
@@ -93,23 +90,6 @@ async function launchUpdate(svc: Services, projectId: string, picks: UpdatePick[
       },
     });
     progress.result = result;
-
-    if (result.ok && result.pushed && !(project.openPullRequest && result.createdBranch)) {
-      await syncPullRequest(svc, path, project.remote).catch((error: unknown) => {
-        progress.log += `
-Could not update the pull request: ${error instanceof Error ? error.message : String(error)}
-`;
-      });
-    }
-    if (result.ok && project.openPullRequest && (result.createdBranch || plan.continueBranch)) {
-      try {
-        progress.pullRequestUrl = (await openPullRequest(svc, projectId)).url;
-      } catch (error) {
-        progress.log += `
-Could not open a pull request: ${error instanceof Error ? error.message : String(error)}
-`;
-      }
-    }
 
     emitRun(progress);
     await svc.store.db

@@ -64,22 +64,6 @@ export function ProjectSettings({ project, detectedChecks }: { project: ProjectW
             onChange={(updateOnBranch) => save.mutate({ updateOnBranch })}
           />
         </SettingRow>
-        <SettingRow label="Push after commit">
-          <Switch
-            label="Push after commit"
-            checked={project.pushAfterCommit}
-            onChange={(pushAfterCommit) => save.mutate({ pushAfterCommit })}
-          />
-        </SettingRow>
-        <SettingRow label="Open a pull request" description="Needs a GitHub token">
-          <Switch
-            label="Open a pull request"
-            checked={project.openPullRequest}
-            onChange={(openPullRequest) =>
-              save.mutate({ openPullRequest, pushAfterCommit: openPullRequest || project.pushAfterCommit })
-            }
-          />
-        </SettingRow>
       </SettingsGroup>
 
       <SettingsGroup title="Checks and versions">

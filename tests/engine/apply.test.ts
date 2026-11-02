@@ -163,7 +163,7 @@ describe("commitMessage", () => {
 });
 
 describe("runUpdate", () => {
-  it("branches, adds through the package manager, checks, commits and pushes in order", async () => {
+  it("branches, adds through the package manager, checks and commits in order, never pushing", async () => {
     const io = memoryIo(
       { "/r/package.json": ROOT_PKG, "/r/pnpm-lock.yaml": "lockfileVersion: '9.0'\n" },
       { run: gitRunner() },
@@ -174,7 +174,6 @@ describe("runUpdate", () => {
       branch: "tidra/deps-2026-10-31",
       checks: [{ label: "check", command: scriptCommand(ws.pm, "check") }],
       commit: true,
-      push: true,
       onStep: (step, state) => steps.push(`${step}:${state}`),
     });
 
@@ -183,7 +182,6 @@ describe("runUpdate", () => {
       createdBranch: "tidra/deps-2026-10-31",
       previousBranch: "main",
       commitSha: "abc123",
-      pushed: true,
     });
     expect(result.touched).toEqual(["package.json", "pnpm-lock.yaml"]);
     expect(io.runs.map((r) => [r.program, ...r.args].join(" "))).toEqual([
@@ -194,31 +192,20 @@ describe("runUpdate", () => {
       "git add -- package.json pnpm-lock.yaml",
       "git commit -m chore(deps): bump react 18.3.1 → 19.3.1",
       "git rev-parse HEAD",
-      "git push --set-upstream origin tidra/deps-2026-10-31",
     ]);
-    expect(steps.filter((s) => s.endsWith(":done"))).toHaveLength(6);
+    expect(steps.filter((s) => s.endsWith(":done"))).toHaveLength(5);
     expect(steps).toContain("write:skipped");
-  });
-
-  it("pushes the update branch it continued on", async () => {
-    const onUpdateBranch = "# branch.oid a\n# branch.head tidra/deps-1\n";
-    const io = memoryIo({ "/r/package.json": ROOT_PKG }, { run: gitRunner(onUpdateBranch) });
-    const ws = await loadWorkspace(io, "/r");
-    const result = await runUpdate(io, ws, [react], { checks: [], commit: true, push: true, continueBranch: true });
-    expect(result.ok).toBe(true);
-    expect(io.runs.some((r) => r.args.join(" ") === "push --set-upstream origin tidra/deps-1")).toBe(true);
-    expect(io.runs.some((r) => r.args[0] === "switch")).toBe(false);
   });
 
   it("refuses a dirty tree unless stashing is allowed", async () => {
     const dirty = `${CLEAN}1 .M N... 100644 100644 100644 a b src/a.ts\n`;
     const io = memoryIo({ "/r/package.json": ROOT_PKG }, { run: gitRunner(dirty) });
     const ws = await loadWorkspace(io, "/r");
-    const refused = await runUpdate(io, ws, [react], { checks: [], commit: false, push: false });
+    const refused = await runUpdate(io, ws, [react], { checks: [], commit: false });
     expect(refused).toMatchObject({ ok: false, failedStep: "preflight" });
     expect(io.files.get("/r/package.json")).toBe(ROOT_PKG);
 
-    const stashed = await runUpdate(io, ws, [react], { checks: [], commit: false, push: false, stash: true });
+    const stashed = await runUpdate(io, ws, [react], { checks: [], commit: false, stash: true });
     expect(stashed.ok).toBe(true);
     expect(io.runs.some((r) => r.args[0] === "stash")).toBe(true);
   });
@@ -229,7 +216,6 @@ describe("runUpdate", () => {
     const result = await runUpdate(io, ws, [react], {
       checks: [{ label: "check", command: scriptCommand(ws.pm, "check") }],
       commit: true,
-      push: false,
     });
     expect(result).toMatchObject({ ok: false, failedStep: "checks" });
     expect(result.error).toContain("npm run check exited with 1");

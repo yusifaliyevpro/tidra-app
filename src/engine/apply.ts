@@ -117,20 +117,17 @@ export function commitMessage(selections: Selection[]): string {
   );
 }
 
-export const UPDATE_STEPS = ["preflight", "branch", "write", "install", "checks", "commit", "push"] as const;
+export const UPDATE_STEPS = ["preflight", "branch", "write", "install", "checks", "commit"] as const;
 export type UpdateStep = (typeof UPDATE_STEPS)[number];
 export type StepState = "running" | "done" | "skipped" | "failed";
 
 export interface UpdateOptions {
   /** Create and switch to this branch first; `undefined` updates the current branch. */
   branch?: string;
-  /** Already on an update branch from an earlier run: commit there and push it like a created one. */
-  continueBranch?: boolean;
   /** Stash local changes instead of refusing to run on a dirty tree. */
   stash?: boolean;
   checks: Check[];
   commit: boolean;
-  push: boolean;
   onStep?: (step: UpdateStep, state: StepState, detail?: string) => void;
   onOutput?: (chunk: string, stream: OutputStream) => void;
   signal?: AbortSignal;
@@ -143,7 +140,6 @@ export interface UpdateResult {
   previousBranch?: string;
   createdBranch?: string;
   commitSha?: string;
-  pushed?: boolean;
   /** The commit message this update uses, kept so a run stopped by its checks can still be committed later. */
   message?: string;
   changes: FileChange[];
@@ -243,14 +239,6 @@ export async function runUpdate(
       result.commitSha = await git.headSha();
       done();
     } else skip("commit");
-
-    const pushBranch = result.createdBranch ?? (options.continueBranch ? result.previousBranch : undefined);
-    if (options.push && options.commit && pushBranch) {
-      begin("push");
-      await git.push(pushBranch);
-      result.pushed = true;
-      done();
-    } else skip("push");
 
     result.ok = true;
   } catch (error) {

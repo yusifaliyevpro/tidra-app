@@ -13,7 +13,7 @@ describe("updateBranchPlan", () => {
     const { svc, close } = await testServices(io);
     const plan = await updateBranchPlan(svc, { path: "/r", remote: null, updateOnBranch: true }, "tidra/deps-new");
     close();
-    expect(plan).toEqual({ continueBranch: true });
+    expect(plan).toEqual({});
     expect(io.runs.some((r) => r.args[0] === "switch")).toBe(false);
   });
 
@@ -21,14 +21,14 @@ describe("updateBranchPlan", () => {
     const { svc, close } = await testServices(memoryIo({}, { run: onBranch("main") }));
     const plan = await updateBranchPlan(svc, { path: "/r", remote: null, updateOnBranch: true }, "tidra/deps-new");
     close();
-    expect(plan).toEqual({ branch: "tidra/deps-new", continueBranch: false });
+    expect(plan).toEqual({ branch: "tidra/deps-new" });
   });
 
   it("stays on the current branch when branches are off", async () => {
     const { svc, close } = await testServices(memoryIo({}, { run: onBranch("main") }));
     const plan = await updateBranchPlan(svc, { path: "/r", remote: null, updateOnBranch: false }, "tidra/deps-new");
     close();
-    expect(plan).toEqual({ continueBranch: false });
+    expect(plan).toEqual({});
   });
 });
 

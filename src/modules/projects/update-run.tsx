@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { cn } from "cn";
-import { Check, ChevronRight, CircleCheck, CircleX, ExternalLink as ExternalIcon, X } from "lucide-react";
+import { Check, ChevronRight, CircleCheck, CircleX, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useReport } from "@/app/queries";
 import { useServices } from "@/app/services";
@@ -8,7 +8,7 @@ import { UPDATE_STEPS, type UpdateResult, type UpdateStep } from "@/engine/apply
 import { revertRun, subscribeRun, type RunProgress } from "@/services/updates";
 import { Button } from "@/ui/button";
 import { Dialog } from "@/ui/dialog";
-import { openExternal, openInVsCode } from "@/ui/external";
+import { openInVsCode } from "@/ui/external";
 import { Log } from "@/ui/log";
 import { Spinner } from "@/ui/spinner";
 import { toast, toastError } from "@/ui/toast";
@@ -22,7 +22,6 @@ const STEP_LABEL: Record<UpdateStep, string> = {
   install: "Install",
   checks: "Checks",
   commit: "Commit",
-  push: "Push",
 };
 
 type StepState = RunProgress["steps"][UpdateStep];
@@ -50,13 +49,7 @@ export function UpdateRunDialog({
       className="w-[820px]"
       footer={
         result ? (
-          <RunActions
-            result={result}
-            pullRequestUrl={progress?.pullRequestUrl}
-            projectId={projectId}
-            path={path}
-            onClose={onClose}
-          />
+          <RunActions result={result} projectId={projectId} path={path} onClose={onClose} />
         ) : (
           <Button variant="ghost" onClick={onClose}>
             Run in background
@@ -98,7 +91,7 @@ function StatusHeader({ progress }: { progress: RunProgress | undefined }) {
         </span>
         <span className="truncate text-sm text-muted">
           {result.ok
-            ? `Committed${result.pushed ? " and pushed" : ""} on `
+            ? "Committed on "
             : result.failedStep === "preflight"
               ? "Nothing was changed. "
               : "Changes are left in "}
@@ -179,7 +172,6 @@ const NEXT_STEP: Partial<Record<UpdateStep, string>> = {
   checks: "Fix what failed in your editor, then Commit & Push. Or revert to undo the update.",
   install: "The package manager could not install the new versions. Revert, or fix it and Commit & Push.",
   preflight: "Commit or stash your local changes, then run the update again.",
-  push: "The commit is saved locally. Push again once the remote accepts it.",
 };
 
 function Failure({ result }: { result: UpdateResult }) {
@@ -217,13 +209,11 @@ function Output({ log, defaultOpen }: { log: string; defaultOpen: boolean }) {
 /** After a run: revert or fix and commit when it stopped, push and open a PR when it finished. */
 function RunActions({
   result,
-  pullRequestUrl,
   projectId,
   path,
   onClose,
 }: {
   result: UpdateResult;
-  pullRequestUrl?: string;
   projectId: string;
   path?: string;
   onClose: () => void;
@@ -252,13 +242,7 @@ function RunActions({
           Open in VS Code
         </Button>
       ) : null}
-      {pullRequestUrl ? (
-        <Button icon={<ExternalIcon className="size-4" />} onClick={() => openExternal(pullRequestUrl)}>
-          View PR
-        </Button>
-      ) : (
-        <BranchActions projectId={projectId} git={report?.git} allowCommit={canRevert} />
-      )}
+      <BranchActions projectId={projectId} git={report?.git} allowCommit={canRevert} />
       <Button variant={result.ok ? "primary" : "secondary"} onClick={onClose}>
         {result.ok ? "Done" : "Close"}
       </Button>

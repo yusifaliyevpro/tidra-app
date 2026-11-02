@@ -130,22 +130,22 @@ export async function updateBranchPlan(
   svc: Services,
   project: { path: string; remote: string | null; updateOnBranch: boolean },
   newBranch: string,
-): Promise<{ branch?: string; continueBranch: boolean }> {
-  if (!project.updateOnBranch) return { continueBranch: false };
+): Promise<{ branch?: string }> {
+  if (!project.updateOnBranch) return {};
   const git = createGit(svc.io, project.path);
   const status = await git.status();
-  if (!isUpdateBranch(status.branch) || !status.branch) return { branch: newBranch, continueBranch: false };
+  if (!isUpdateBranch(status.branch) || !status.branch) return { branch: newBranch };
 
   const target = await pullTarget(svc, project.path, project.remote);
   const pull = await pullFor(svc, target, status.branch).catch((): PullState => ({ state: "none" }));
-  if (pull.state === "open" || pull.state === "none") return { continueBranch: true };
+  if (pull.state === "open" || pull.state === "none") return {};
 
   // Leaving with local changes would carry them along; the update's own preflight reports them instead.
-  if (!isClean(status)) return { continueBranch: true };
+  if (!isClean(status)) return {};
   const base = (await git.defaultBranch()) ?? "main";
   await git.switchTo(base);
   await git.pull().catch(() => undefined);
-  return { branch: newBranch, continueBranch: false };
+  return { branch: newBranch };
 }
 
 /** Commits on HEAD that the target's default branch doesn't have, oldest first. */

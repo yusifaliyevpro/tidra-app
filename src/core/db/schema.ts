@@ -18,8 +18,6 @@ export const projects = sqliteTable("projects", {
   /** Custom check command lines; null means auto-detect from scripts. */
   checks: text("checks", { mode: "json" }).$type<string[] | null>(),
   updateOnBranch: integer("update_on_branch", { mode: "boolean" }).notNull().default(true),
-  pushAfterCommit: integer("push_after_commit", { mode: "boolean" }).notNull().default(false),
-  openPullRequest: integer("open_pull_request", { mode: "boolean" }).notNull().default(false),
   majorPins: text("major_pins", { mode: "json" }).$type<string[] | null>(),
   createdAt: text("created_at").notNull(),
 });
