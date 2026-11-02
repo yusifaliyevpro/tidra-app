@@ -1,23 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
-import { useSyncExternalStore } from "react";
 import { useServices } from "@/app/services";
-import { rateLimits, subscribeRateLimits } from "@/services/github-limit";
 import { TimeAgo } from "@/ui/time";
 
-/** GitHub's REST budget as of the last answer; asks `/rate_limit` (free) once when nothing has been seen yet. */
+/** GitHub's REST budget as GitHub reports it; `/rate_limit` is free, so polling it costs nothing. */
 export function GitHubLimit({ className }: { className?: string }) {
   const svc = useServices();
-  const limits = useSyncExternalStore(subscribeRateLimits, rateLimits);
-  useQuery({
+  const { data: core } = useQuery({
     queryKey: ["github-rate-limit"],
-    enabled: !limits.core && !svc.preview,
-    staleTime: Number.POSITIVE_INFINITY,
-    queryFn: async () => {
-      await (await svc.github()).rateLimit();
-      return true;
-    },
+    enabled: !svc.preview,
+    refetchInterval: 60_000,
+    queryFn: async () => (await svc.github()).rateLimit(),
   });
-  const core = limits.core;
   if (!core) return null;
   const low = core.remaining < core.limit * 0.1;
   return (

@@ -13,7 +13,6 @@ import { createRegistryClient, type RegistryClient } from "@/engine/registry";
 import { createGitHub, type GitHub } from "@/integrations/github";
 import { stampSecret, SYNCED_TABLE_META } from "@/sync/engine";
 import { createClock, type Clock } from "@/sync/hlc";
-import { recordRateLimit } from "./github-limit";
 
 export interface Services {
   preview: boolean;
@@ -99,7 +98,6 @@ export async function createServices(options: { io: Io; driver: SqlDriver; previ
         fetch: io.fetch,
         token: await secrets.get(SECRET_KEYS.github),
         cache: store.httpCache,
-        onRateLimit: recordRateLimit,
       });
     },
     async setSecret(key, value) {

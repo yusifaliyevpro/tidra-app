@@ -225,6 +225,7 @@ export async function registerJobs(svc: Services): Promise<void> {
         runs.set(definition.id, Date.now());
         await svc.store.setLocal(LAST_RUNS, Object.fromEntries(runs));
         await updateTray(svc);
+        svc.invalidate(["github-rate-limit"]);
       },
     };
     svc.scheduler.register(job, lastRuns[definition.id]);

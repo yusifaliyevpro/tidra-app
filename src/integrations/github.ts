@@ -24,6 +24,14 @@ const ReleaseSchema = z.looseObject({
 });
 const Releases = z.compile(z.array(ReleaseSchema));
 
+const RateLimitBody = z.compile(
+  z.looseObject({
+    resources: z.looseObject({
+      core: z.looseObject({ limit: z.number(), remaining: z.number(), reset: z.number() }),
+    }),
+  }),
+);
+
 const NotificationSchema = z.looseObject({
   id: z.string(),
   reason: z.string(),
@@ -147,20 +155,10 @@ const PULL_FIELDS = `... on PullRequest {
 }`;
 
 export interface RateLimit {
-  /** `core` for REST, `graphql` for GraphQL; each has its own hourly budget. */
-  resource: string;
   limit: number;
   remaining: number;
   /** Epoch milliseconds when the budget refills. */
   resetAt: number;
-}
-
-export function readRateLimit(headers: Headers): RateLimit | undefined {
-  const limit = Number(headers.get("x-ratelimit-limit"));
-  const remaining = Number(headers.get("x-ratelimit-remaining"));
-  const reset = Number(headers.get("x-ratelimit-reset"));
-  if (!headers.has("x-ratelimit-limit") || [limit, remaining, reset].some(Number.isNaN)) return undefined;
-  return { resource: headers.get("x-ratelimit-resource") ?? "core", limit, remaining, resetAt: reset * 1000 };
 }
 
 export function createGitHub(options: {
@@ -168,7 +166,6 @@ export function createGitHub(options: {
   token?: string;
   /** ETag cache for GETs: a 304 answer does not count against the rate limit. */
   cache?: HttpCache;
-  onRateLimit?: (limit: RateLimit) => void;
 }) {
   const API = "https://api.github.com";
   const headers = (extra: HeadersInit | undefined) => {
@@ -184,8 +181,6 @@ export function createGitHub(options: {
       ...init,
       headers: headers(init.headers),
     });
-    const rate = readRateLimit(response.headers);
-    if (rate) options.onRateLimit?.(rate);
     if (response.status === 304) return response;
     if (!response.ok) {
       const limited = response.status === 403 && response.headers.get("x-ratelimit-remaining") === "0";
@@ -256,8 +251,13 @@ export function createGitHub(options: {
 
     repo: (owner: string, repo: string) => json(`/repos/${owner}/${repo}`, RepoSchema),
 
-    /** Free to call: reports the budget without spending it. */
-    rateLimit: () => request("/rate_limit"),
+    /** REST budget straight from GitHub, like `gh api rate_limit`; free, so it never spends what it reports. */
+    async rateLimit(): Promise<RateLimit> {
+      const data: unknown = await (await request("/rate_limit")).json();
+      if (!z.validate(RateLimitBody, data)) throw new GitHubError("Unexpected response from /rate_limit", 200);
+      const { limit, remaining, reset } = data.resources.core;
+      return { limit, remaining, resetAt: reset * 1000 };
+    },
 
     notifications: () => json("/notifications?per_page=50", Notifications),
     markNotificationRead: (id: string) => request(`/notifications/threads/${id}`, { method: "PATCH" }),
