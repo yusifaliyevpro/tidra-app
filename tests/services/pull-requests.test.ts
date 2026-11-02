@@ -92,6 +92,15 @@ describe("commitProject", () => {
     expect(git).toContain("commit -m chore(deps): bump react 19.2.0 → 19.3.1");
   });
 
+  it("uses an update's message only once", async () => {
+    const { io, svc, close } = await stoppedUpdate("chore(deps): bump react 19.2.0 → 19.3.1");
+    await commitProject(svc, "p1");
+    const second = await commitProject(svc, "p1");
+    close();
+    expect(second).toBe("chore(deps): update dependencies");
+    expect(io.runs.filter((r) => r.args[0] === "commit")).toHaveLength(2);
+  });
+
   it("pushes right after committing for Commit & Push", async () => {
     const { io, svc, close } = await stoppedUpdate("chore(deps): bump 2 dependencies");
     await commitAndPushProject(svc, "p1");

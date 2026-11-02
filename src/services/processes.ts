@@ -1,5 +1,5 @@
 import { ulid } from "ulid";
-import type { Command } from "@/engine/pm";
+import { display, type Command } from "@/engine/pm";
 import type { Services } from "./context";
 
 export interface ManagedProcess {
@@ -7,6 +7,8 @@ export interface ManagedProcess {
   projectId?: string;
   label: string;
   command: Command;
+  /** Run after `command` succeeds, in order, stopping at the first that fails (a project's checks). */
+  next?: Command[];
   cwd?: string;
   output: string;
   running: boolean;
@@ -49,6 +51,7 @@ export function createProcessManager(svc: Services) {
     start(input: {
       label: string;
       command: Command;
+      next?: Command[];
       cwd?: string;
       projectId?: string;
       /** Runs once the process ends, however it ended. */
@@ -67,16 +70,26 @@ export function createProcessManager(svc: Services) {
       };
       processes.set(id, proc);
       notify();
-      void svc.io
-        .run(input.command.program, input.command.args, {
-          cwd: input.cwd,
-          env: { FORCE_COLOR: "1" },
-          signal: abort.signal,
-          onOutput: (chunk) => {
-            proc.output = (proc.output + chunk).slice(-MAX_OUTPUT);
-            notifySoon();
-          },
-        })
+      const append = (chunk: string) => {
+        proc.output = (proc.output + chunk).slice(-MAX_OUTPUT);
+        notifySoon();
+      };
+      const runAll = async () => {
+        const commands = [input.command, ...(input.next ?? [])];
+        let result = { code: 0 as number | null, stdout: "", stderr: "" };
+        for (const command of commands) {
+          if (commands.length > 1) append(`${proc.output ? "\n" : ""}$ ${display(command)}\n`);
+          result = await svc.io.run(command.program, command.args, {
+            cwd: input.cwd,
+            env: { FORCE_COLOR: "1" },
+            signal: abort.signal,
+            onOutput: append,
+          });
+          if (result.code !== 0) break;
+        }
+        return result;
+      };
+      void runAll()
         .then(
           (result) => {
             proc.running = false;

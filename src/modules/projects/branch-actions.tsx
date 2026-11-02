@@ -126,7 +126,10 @@ function CommitPushButton({ projectId, size }: { projectId: string; size: Size }
     },
     onSuccess: async (message) => {
       toast(message);
-      await queryClient.invalidateQueries({ queryKey: ["branch-pull"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["branch-pull"] }),
+        queryClient.invalidateQueries({ queryKey: ["runs", projectId] }),
+      ]);
     },
     onError: toastError,
   });

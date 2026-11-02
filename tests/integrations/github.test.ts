@@ -19,7 +19,7 @@ describe("rateLimit", () => {
         );
       },
     });
-    expect(await github.rateLimit()).toEqual({ limit: 5000, remaining: 4939, resetAt: 1_793_000_000_000 });
+    expect(await github.rateLimit()).toEqual({ limit: 5000, remaining: 4939 });
     expect(urls).toEqual(["https://api.github.com/rate_limit"]);
   });
 });

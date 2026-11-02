@@ -5,7 +5,7 @@ import { createGit, normalizeRemote, type BranchInfo, type ForkInfo, type GitSta
 import { createLimit } from "@/engine/limit";
 import { computeOutdated, DEFAULT_MAJOR_PINS, type OutdatedEntry } from "@/engine/outdated";
 import { basename, join, normalize, relative } from "@/engine/path";
-import { checksFromLines, detectChecks, display } from "@/engine/pm";
+import { checksFromLines, detectChecks, display, type Command } from "@/engine/pm";
 import { loadWorkspace, type PackageManager, type Workspace } from "@/engine/workspace";
 import type { Services } from "./context";
 import { readSnapshot, readSnapshots, writeSnapshot } from "./snapshot";
@@ -81,6 +81,14 @@ export function projectChecks(project: ProjectWithPath, workspace: Workspace) {
   return project.checks?.length
     ? checksFromLines(project.checks)
     : detectChecks(workspace.pm, workspace.importers[0]?.manifest ?? {});
+}
+
+/** The commands "Run checks" runs, in the workspace root like an update's checks. */
+export async function checkCommands(svc: Services, projectId: string): Promise<{ cwd: string; commands: Command[] }> {
+  const project = await svc.store.getProject(projectId);
+  if (!project?.path) throw new Error("This project has no folder on this device.");
+  const workspace = await loadWorkspace(svc.io, project.path);
+  return { cwd: workspace.root, commands: projectChecks(project, workspace).map((check) => check.command) };
 }
 
 type GitInfo = [GitStatus | undefined, BranchInfo[], ForkInfo | undefined];

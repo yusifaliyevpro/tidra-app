@@ -6,7 +6,7 @@
 
 ---
 
-Tidra watches the projects on your machine and tells you what needs attention: outdated dependencies, what changed upstream, security advisories, failing CI, pull requests waiting for you, and broken deploys. When it's time to update, it edits your manifests, installs, runs your checks and commits, without opening an editor.
+Tidra watches the projects on your machine and tells you what needs attention: outdated dependencies, what changed upstream, security advisories, failing CI, pull requests waiting for you, and broken deploys. When it's time to update, it edits your manifests, installs and runs your checks, then you review and commit with one click, without opening an editor.
 
 <p align="center">
   <img src="assets/overview.png" alt="Tidra overview: outdated packages, advisories, CI and pull requests across every project" />
@@ -16,7 +16,7 @@ Tidra watches the projects on your machine and tells you what needs attention: o
 
 ## Features
 
-- **Projects**: add folders, see branch, local changes and outdated packages grouped by major / minor / patch. Pick updates, Tidra installs on a new branch, runs your `check` script (or typecheck / lint / test) and commits.
+- **Projects**: add folders, see branch, local changes and outdated packages grouped by major / minor / patch. Pick updates, Tidra installs on a new branch, runs your `check` script (or typecheck / lint / test), and leaves the commit to you.
 - **Changelogs**: release notes between the version you have installed and the latest, with breaking changes flagged.
 - **Security**: advisories for your installed dependency tree, with a "would fail CI" badge that mirrors `pnpm audit --prod --audit-level high`, and one-click fixes.
 - **GitHub Actions versions**: outdated `uses:` refs in your workflows, updated the same way as packages.

@@ -14,6 +14,7 @@ import { Spinner } from "@/ui/spinner";
 import { toast, toastError } from "@/ui/toast";
 import { VsCodeIcon } from "@/ui/vscode-icon";
 import { BranchActions } from "./branch-actions";
+import { RunChecksButton } from "./run-checks";
 
 const STEP_LABEL: Record<UpdateStep, string> = {
   preflight: "Check tree",
@@ -21,7 +22,6 @@ const STEP_LABEL: Record<UpdateStep, string> = {
   write: "Edit",
   install: "Install",
   checks: "Checks",
-  commit: "Commit",
 };
 
 type StepState = RunProgress["steps"][UpdateStep];
@@ -91,19 +91,18 @@ function StatusHeader({ progress }: { progress: RunProgress | undefined }) {
         </span>
         <span className="truncate text-sm text-muted">
           {result.ok
-            ? "Committed on "
+            ? "Ready to commit on "
             : result.failedStep === "preflight"
               ? "Nothing was changed. "
               : "Changes are left in "}
           {branch && result.failedStep !== "preflight" ? <span className="font-mono text-fg">{branch}</span> : null}
-          {result.commitSha ? <span className="font-mono"> · {result.commitSha.slice(0, 7)}</span> : null}
         </span>
       </div>
     </div>
   );
 }
 
-/** The seven steps on one line, joined so progress reads left to right. */
+/** The steps on one line, joined so progress reads left to right. */
 function Stepper({ steps }: { steps: RunProgress["steps"] }) {
   return (
     <ol className="flex items-start">
@@ -169,7 +168,7 @@ function StepDot({ state }: { state: StepState }) {
 }
 
 const NEXT_STEP: Partial<Record<UpdateStep, string>> = {
-  checks: "Fix what failed in your editor, then Commit & Push. Or revert to undo the update.",
+  checks: "Fix what failed in your editor and run the checks again, then commit. Or revert to undo the update.",
   install: "The package manager could not install the new versions. Revert, or fix it and Commit & Push.",
   preflight: "Commit or stash your local changes, then run the update again.",
 };
@@ -206,7 +205,7 @@ function Output({ log, defaultOpen }: { log: string; defaultOpen: boolean }) {
   );
 }
 
-/** After a run: revert or fix and commit when it stopped, push and open a PR when it finished. */
+/** After a run, whatever changed stays uncommitted: revert it, check it again, or commit it. */
 function RunActions({
   result,
   projectId,
@@ -228,11 +227,11 @@ function RunActions({
     onError: toastError,
   });
   const { data: report } = useReport(projectId);
-  const canRevert = !result.ok && !result.commitSha && result.failedStep !== "preflight";
+  const changed = result.failedStep !== "preflight";
 
   return (
     <>
-      {canRevert ? (
+      {changed ? (
         <Button variant="danger" className="mr-auto" loading={revert.isPending} onClick={() => revert.mutate()}>
           Revert changes
         </Button>
@@ -242,10 +241,9 @@ function RunActions({
           Open in VS Code
         </Button>
       ) : null}
-      <BranchActions projectId={projectId} git={report?.git} allowCommit={canRevert} />
-      <Button variant={result.ok ? "primary" : "secondary"} onClick={onClose}>
-        {result.ok ? "Done" : "Close"}
-      </Button>
+      {changed ? <RunChecksButton projectId={projectId} /> : null}
+      <BranchActions projectId={projectId} git={report?.git} allowCommit={changed} />
+      <Button onClick={onClose}>Close</Button>
     </>
   );
 }

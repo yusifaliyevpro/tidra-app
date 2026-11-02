@@ -27,7 +27,7 @@ const Releases = z.compile(z.array(ReleaseSchema));
 const RateLimitBody = z.compile(
   z.looseObject({
     resources: z.looseObject({
-      core: z.looseObject({ limit: z.number(), remaining: z.number(), reset: z.number() }),
+      core: z.looseObject({ limit: z.number(), remaining: z.number() }),
     }),
   }),
 );
@@ -157,8 +157,6 @@ const PULL_FIELDS = `... on PullRequest {
 export interface RateLimit {
   limit: number;
   remaining: number;
-  /** Epoch milliseconds when the budget refills. */
-  resetAt: number;
 }
 
 export function createGitHub(options: {
@@ -255,8 +253,8 @@ export function createGitHub(options: {
     async rateLimit(): Promise<RateLimit> {
       const data: unknown = await (await request("/rate_limit")).json();
       if (!z.validate(RateLimitBody, data)) throw new GitHubError("Unexpected response from /rate_limit", 200);
-      const { limit, remaining, reset } = data.resources.core;
-      return { limit, remaining, resetAt: reset * 1000 };
+      const { limit, remaining } = data.resources.core;
+      return { limit, remaining };
     },
 
     notifications: () => json("/notifications?per_page=50", Notifications),

@@ -79,7 +79,6 @@ async function launchUpdate(svc: Services, projectId: string, picks: UpdatePick[
     const result = await runUpdate(svc.io, workspace, selections, {
       branch: plan.branch,
       checks: projectChecks(project, workspace),
-      commit: true,
       onStep: (step, state, detail) => {
         progress.steps[step] = { state, detail };
         emitRun(progress);

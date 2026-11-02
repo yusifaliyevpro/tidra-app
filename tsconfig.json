@@ -21,6 +21,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "tests", "*.ts"],
+  "include": ["src", "tests", "scripts", "*.ts"],
   "exclude": ["node_modules", "dist", "src-tauri"]
 }

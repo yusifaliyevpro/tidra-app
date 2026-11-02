@@ -19,8 +19,8 @@ export const hasUnpushed = (git: GitStatus | undefined) =>
   Boolean(git?.branch) && ((git?.ahead ?? 0) > 0 || (!git?.upstream && isTidraBranch(git?.branch)));
 
 /**
- * Commits everything uncommitted in the project's checkout. The message comes from the latest update run that
- * stopped before committing (say, at its checks), so the commit reads as if the update had finished.
+ * Commits everything uncommitted in the project's checkout. Updates never commit on their own, so the message
+ * comes from the latest update not committed yet; that run is then marked, so its message is used once.
  */
 export async function commitProject(svc: Services, projectId: string): Promise<string> {
   const project = await svc.store.getProject(projectId);
@@ -29,25 +29,37 @@ export async function commitProject(svc: Services, projectId: string): Promise<s
   const git = createGit(svc.io, root);
   const status = await git.status();
   if (isClean(status)) throw new Error("There is nothing to commit.");
-  const message = (await pendingRunMessage(svc, projectId)) ?? "chore(deps): update dependencies";
+  const pending = await pendingRun(svc, projectId);
+  const message = pending?.message ?? "chore(deps): update dependencies";
   await git.run(["add", "--all"]);
   await git.commit(message);
+  if (pending) {
+    const commitSha = await git.headSha();
+    await svc.store.db
+      .update(runs)
+      .set({ result: { ...pending.result, commitSha } })
+      .where(eq(runs.id, pending.id));
+  }
   const members = (await listRepos(svc)).find((r) => r.projects.some((p) => p.id === projectId))?.projects ?? [];
   const gitCache: GitInfoCache = new Map();
   await Promise.all(members.map((p) => refreshProject(svc, p.id, { gitCache })));
   return message.split("\n")[0] ?? message;
 }
 
-async function pendingRunMessage(svc: Services, projectId: string): Promise<string | undefined> {
+/** An update left its changes uncommitted, so the project page offers Commit on any branch. */
+export const hasUncommittedUpdate = async (svc: Services, projectId: string) =>
+  (await pendingRun(svc, projectId)) !== undefined;
+
+async function pendingRun(svc: Services, projectId: string) {
   const [latest] = await svc.store.db.query.runs.findMany({
     where: eq(runs.projectId, projectId),
     orderBy: (table, { desc }) => desc(table.startedAt),
     limit: 1,
   });
   const result = latest?.result;
-  if (!result || typeof result !== "object") return undefined;
+  if (!latest || !result || typeof result !== "object") return undefined;
   const { message, commitSha } = result as { message?: unknown; commitSha?: unknown };
-  return typeof message === "string" && !commitSha ? message : undefined;
+  return typeof message === "string" && commitSha === undefined ? { id: latest.id, message, result } : undefined;
 }
 
 /** Commit, then push: the one-click way out of an update that stopped at its checks. */

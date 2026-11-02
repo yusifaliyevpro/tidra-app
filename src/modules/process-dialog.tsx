@@ -61,11 +61,19 @@ function ProcessActions({
   const { processes } = useApp();
   const restart = () =>
     onRestarted(
-      processes.start({ label: proc.label, command: proc.command, cwd: proc.cwd, projectId: proc.projectId }),
+      processes.start({
+        label: proc.label,
+        command: proc.command,
+        next: proc.next,
+        cwd: proc.cwd,
+        projectId: proc.projectId,
+      }),
     );
   return (
     <>
-      <span className="mr-auto self-center font-mono text-xs text-faint">{display(proc.command)}</span>
+      <span className="mr-auto self-center truncate font-mono text-xs text-faint">
+        {[proc.command, ...(proc.next ?? [])].map(display).join(" · ")}
+      </span>
       {proc.running ? (
         <Button icon={<Square className="size-3.5" />} onClick={() => processes.stop(proc.id)}>
           Stop

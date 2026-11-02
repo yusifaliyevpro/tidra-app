@@ -117,7 +117,8 @@ export function commitMessage(selections: Selection[]): string {
   );
 }
 
-export const UPDATE_STEPS = ["preflight", "branch", "write", "install", "checks", "commit"] as const;
+/** Stops after the checks: committing is always the user's click. */
+export const UPDATE_STEPS = ["preflight", "branch", "write", "install", "checks"] as const;
 export type UpdateStep = (typeof UPDATE_STEPS)[number];
 export type StepState = "running" | "done" | "skipped" | "failed";
 
@@ -127,7 +128,6 @@ export interface UpdateOptions {
   /** Stash local changes instead of refusing to run on a dirty tree. */
   stash?: boolean;
   checks: Check[];
-  commit: boolean;
   onStep?: (step: UpdateStep, state: StepState, detail?: string) => void;
   onOutput?: (chunk: string, stream: OutputStream) => void;
   signal?: AbortSignal;
@@ -139,8 +139,7 @@ export interface UpdateResult {
   error?: string;
   previousBranch?: string;
   createdBranch?: string;
-  commitSha?: string;
-  /** The commit message this update uses, kept so a run stopped by its checks can still be committed later. */
+  /** The message Commit uses for this update's changes. */
   message?: string;
   changes: FileChange[];
   /** Files the update touched, relative to the project root, for revert. */
@@ -231,14 +230,6 @@ export async function runUpdate(
       for (const check of options.checks) await exec(check.command);
       done();
     } else skip("checks");
-
-    if (options.commit) {
-      begin("commit");
-      await git.add(result.touched);
-      await git.commit(result.message ?? commitMessage(selections));
-      result.commitSha = await git.headSha();
-      done();
-    } else skip("commit");
 
     result.ok = true;
   } catch (error) {

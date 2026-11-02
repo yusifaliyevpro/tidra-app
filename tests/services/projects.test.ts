@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { refreshProject } from "@/services/projects";
+import { checkCommands, refreshProject } from "@/services/projects";
 import { jsonResponse, memoryIo, packument } from "../support/memory-io";
 import { testServices } from "../support/services";
 
@@ -38,5 +38,19 @@ describe("refreshProject", () => {
     expect(second?.outdated).toEqual(first?.outdated);
     expect(second?.checkedAt).toBe(first?.checkedAt);
     expect(forced?.checkedAt).not.toBe(first?.checkedAt);
+  });
+});
+
+describe("checkCommands", () => {
+  it("returns the project's own check commands, run from the workspace root", async () => {
+    const io = memoryIo({ "/web/package.json": JSON.stringify({ name: "web", scripts: { check: "greenly" } }) });
+    const { svc, close } = await testServices(io);
+    await svc.store.addProject({ id: "p1", name: "web", remote: null, path: "/web" });
+    const detected = await checkCommands(svc, "p1");
+    await svc.store.updateProject("p1", { checks: ["pnpm tsc", "pnpm test"] });
+    const custom = await checkCommands(svc, "p1");
+    close();
+    expect(detected).toEqual({ cwd: "/web", commands: [{ program: "npm", args: ["run", "check"] }] });
+    expect(custom.commands.map((c) => [c.program, ...c.args].join(" "))).toEqual(["pnpm tsc", "pnpm test"]);
   });
 });

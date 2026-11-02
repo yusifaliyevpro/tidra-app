@@ -4,7 +4,7 @@ Guide for AI agents (and humans) working on Tidra. Read this and [STYLE.md](STYL
 
 ## What Tidra is
 
-A desktop app (Tauri 2 + React) that keeps a developer's projects healthy from one place: outdated dependencies (update → run checks → commit, one project or a batch), changelogs between installed and latest versions, security advisories that mirror CI audits, GitHub Actions versions, GitHub inbox / CI / bot PRs, deploys, published-package stats, toolchain updates, scripts and ports, AI breaking-change summaries, and optional end-to-end encrypted sync.
+A desktop app (Tauri 2 + React) that keeps a developer's projects healthy from one place: outdated dependencies (update → run checks → the user commits, one project or a batch), changelogs between installed and latest versions, security advisories that mirror CI audits, GitHub Actions versions, GitHub inbox / CI / bot PRs, deploys, published-package stats, toolchain updates, scripts and ports, AI breaking-change summaries, and optional end-to-end encrypted sync.
 
 Windows 11 first; macOS and Linux supported. Open source (AGPL-3.0-or-later): the repo must never contain personal data, tokens, paths or default projects. Everything is configured inside the app; secrets live in the OS keychain.
 
@@ -22,8 +22,23 @@ Always use `pnpm` / `pnpx`, never npm / npx.
 | `pnpm fmt`                      | oxfmt (run before `pnpm check`)                                                                  |
 | `pnpm check`                    | greenly: tsc, oxfmt check, oxlint, vitest, react-doctor, rustfmt, clippy, cargo test             |
 | `pnpm db:generate`              | drizzle-kit migration from `src/core/db/schema.ts` into `drizzle/`                               |
+| `pnpm cdp`                      | Read or screenshot the running dev app (see Debugging the running app)                           |
 
 Verification before calling work done: `pnpm fmt && pnpm check`.
+
+## Debugging the running app
+
+When a bug only shows in the real app (stale UI, a job that never ends), look at it instead of guessing. `pnpm web` only has demo data and no Tauri, so most real bugs need `pnpm dev` with the webview's debug port open:
+
+1. Close the installed Tidra first: the dev app uses the **same database and keychain**, so it shows the user's real projects, and anything you click there really runs (git, pnpm, GitHub).
+2. Start it in the background: `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 pnpm dev` (WebView2 is Windows; the variable does nothing elsewhere). Wait until `http://127.0.0.1:9222/json` lists a `localhost:1420` page; the first Rust build takes a few minutes.
+3. Drive it with `pnpm cdp`:
+   - `pnpm cdp eval "<expression>"` runs in the page and prints the JSON result. `window.__app` is the `ServicesProvider` value (`{ svc, processes }`), e.g. `pnpm cdp eval "__app.svc.scheduler.states()"`, `"__app.svc.queryClient.getQueryData(['jobs'])"`, or click something: `"[...document.querySelectorAll('a')].find(a => a.textContent === 'Toolchain').click()"`.
+   - `pnpm cdp shot <file.png>` saves a screenshot; read the PNG to see what the user sees. Comparing it with `eval` output is how stale-UI bugs show up (state says done, screen still spins).
+4. Code edits hot-reload; `pnpm cdp eval "location.reload()"` restarts the frontend (it reruns migrations and job registration), Rust edits rebuild on their own.
+5. Clean up: stopping `pnpm dev` can leave its `vite` (port 1420) and `tidra.exe` running, and the next start then fails with "Port 1420 is already in use". Find the owner (`netstat -ano | grep :1420`, then its command line) and stop it only if it is from this repo and you started it; the user may be running their own dev app.
+
+Clipboard writes fail from `eval` ("Document is not focused") because the window isn't focused; a real click works.
 
 ## Architecture
 
@@ -55,7 +70,7 @@ Rules:
 - **Sync providers** implement `SyncProvider` and register in `src/sync/registry.ts`; they move encrypted envelopes only and never touch crypto.
 - **Project identity** is the normalized git remote plus the folder inside the repo (`subdir`), so a monorepo's `apps/*` are separate projects grouped under the repo. Discovery (`src/engine/discover.ts`) walks up to 4 levels and stops at the first `package.json` on each branch.
 - **Repo-level views** (git state, CI, Actions workflows, forks) work per repository through `listRepos()` (`src/services/repos.ts`), never per package, so a monorepo shows once.
-- **GitHub budget**: every GET goes through the ETag cache (304s are free). Home shows the budget from GitHub's free `/rate_limit` endpoint (`src/modules/github-limit.tsx`), polled each minute and after every background job. Don't fetch GitHub per package or per project when per repo will do.
+- **GitHub budget**: every GET goes through the ETag cache (304s are free). Home shows the budget from GitHub's free `/rate_limit` endpoint (`src/modules/github-limit.tsx`) only when fewer than 1,000 requests are left; it is polled each minute and after every background job. Don't fetch GitHub per package or per project when per repo will do.
 - **Notifications**: only news, never a backlog. Advisories notify when a high or critical one is new since the last scan (the first scan just records a baseline), one entry per project. The desktop only gets grouped messages: "You have new high security advisories" and "You have N new notifications". Only notify about fresh events (last 2 days).
 - **Fingerprints** (`src/engine/fingerprint.ts`): `loadWorkspace` hashes every input (manifests, workspace yaml, npm config, lockfile) with SHA-256. Unchanged projects reuse the last registry answers for 2 h, security scans skip OSV for 12 h while the lockfile hash matches, Actions scans skip for 6 h while workflow files match, and parsed lockfiles are cached by hash. "Check again" on a project forces a fresh check.
 - **Background jobs at launch**: each job's last successful run is kept in `kv` (`jobLastRuns`), so a relaunch only runs what is due. At most three jobs run at once, in the priority order in `src/services/jobs.ts`. A full project refresh shares one set of git calls per checkout (`GitInfoCache`), so a monorepo's packages don't each run git.
@@ -112,7 +127,7 @@ Done:
 - All screens: Overview (dashboard: totals, needs-attention table, recent updates, releases, background checks), Projects (filters, branch switcher, grouped by repo), project page, Changelogs, Security (per package), Actions (collapsible per repo), Git, Pull requests, CI, Bot PRs (read-only list), Deploys, My packages, Toolchain, Scripts and ports, Settings (Windows 11 style panes, shortcut recorder, delete all data), onboarding
 - Dependency search lives in the palette (Ctrl+P by default, set in Settings): type a package to see where it is used and update it everywhere
 - Push and open a PR from Tidra (`BranchActions`); merging stays on GitHub, the app never merges
-- An update stopped by its checks leaves changes uncommitted; "Commit & Push" (menu: Commit, Push) commits everything with that run's message (`commitProject`), so nothing is pushed half-done
+- Updates never commit, push or open a PR on their own: they stop after the checks. "Commit & Push" (menu: Commit, Push) commits everything with the latest uncommitted run's message (`commitProject`), and "Run checks" reruns the project's checks in an output dialog (update dialog and project page)
 - Actions updates commit on a `tidra/actions-<date>` branch cut from the default branch (never the current branch); each repo with outdated actions can copy a prompt for a coding agent (`actionsUpdatePrompt`)
 - Sync (`syncRepo`, `SyncButton`): fetch, fast-forward a fork's default branch to `upstream`, pull, push; never merges or rebases on its own
 - Scripts runs any project's scripts; starting one from a project page or Toolchain opens its live output in a dialog there

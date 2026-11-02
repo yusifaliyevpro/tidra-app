@@ -12,9 +12,11 @@ import { BranchActions } from "@/modules/projects/branch-actions";
 import { BranchMenu } from "@/modules/projects/branch-menu";
 import { Dependencies } from "@/modules/projects/dependencies";
 import { ProjectSettings } from "@/modules/projects/project-settings";
+import { RunChecksButton } from "@/modules/projects/run-checks";
 import { SyncButton } from "@/modules/projects/sync-button";
 import { UpdateRunDialog } from "@/modules/projects/update-run";
 import { fetchProject, refreshProject } from "@/services/projects";
+import { hasUncommittedUpdate } from "@/services/pull-requests";
 import { listRuns } from "@/services/updates";
 import { Badge } from "@/ui/badge";
 import { Button, IconButton } from "@/ui/button";
@@ -119,10 +121,16 @@ function ProjectActions({ project, report }: { project: Project; report: Report 
     mutationFn: () => refreshProject(svc, project.id, { force: true }),
     onError: toastError,
   });
+  // Keyed under "runs" so a finished update refreshes it along with the run list.
+  const { data: uncommitted } = useQuery({
+    queryKey: ["runs", project.id, "uncommitted"],
+    queryFn: () => hasUncommittedUpdate(svc, project.id),
+  });
   const path = project.path;
   return (
     <>
-      <BranchActions projectId={project.id} git={report?.git} />
+      <BranchActions projectId={project.id} git={report?.git} allowCommit={uncommitted} />
+      {path && (report?.checks.length ?? 0) > 0 ? <RunChecksButton projectId={project.id} /> : null}
       <SyncButton projectId={project.id} git={report?.git} fork={report?.fork} size="md" />
       {path && inTauri ? (
         <IconButton label="Open folder" icon={<FolderOpen className="size-4" />} onClick={() => openFolder(path)} />

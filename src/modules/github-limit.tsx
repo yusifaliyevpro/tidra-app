@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useServices } from "@/app/services";
-import { TimeAgo } from "@/ui/time";
+
+/** Below this many requests left, the budget is worth a glance; above it the counter is noise. */
+const SHOW_BELOW = 1000;
 
 /** GitHub's REST budget as GitHub reports it; `/rate_limit` is free, so polling it costs nothing. */
 export function GitHubLimit({ className }: { className?: string }) {
@@ -11,15 +13,13 @@ export function GitHubLimit({ className }: { className?: string }) {
     refetchInterval: 60_000,
     queryFn: async () => (await svc.github()).rateLimit(),
   });
-  if (!core) return null;
-  const low = core.remaining < core.limit * 0.1;
+  if (!core || core.remaining >= SHOW_BELOW) return null;
   return (
     <span className={className} title="GitHub API requests left this hour. Cached answers don't count.">
       GitHub{" "}
-      <span className={`tabular ${low ? "text-warn" : "text-muted"}`}>
+      <span className="text-warn tabular">
         {core.remaining.toLocaleString()} / {core.limit.toLocaleString()}
-      </span>{" "}
-      · resets <TimeAgo value={core.resetAt} />
+      </span>
     </span>
   );
 }

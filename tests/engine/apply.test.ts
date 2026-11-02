@@ -163,7 +163,7 @@ describe("commitMessage", () => {
 });
 
 describe("runUpdate", () => {
-  it("branches, adds through the package manager, checks and commits in order, never pushing", async () => {
+  it("branches, adds through the package manager and checks, leaving the commit to the user", async () => {
     const io = memoryIo(
       { "/r/package.json": ROOT_PKG, "/r/pnpm-lock.yaml": "lockfileVersion: '9.0'\n" },
       { run: gitRunner() },
@@ -173,7 +173,6 @@ describe("runUpdate", () => {
     const result = await runUpdate(io, ws, [react], {
       branch: "tidra/deps-2026-10-31",
       checks: [{ label: "check", command: scriptCommand(ws.pm, "check") }],
-      commit: true,
       onStep: (step, state) => steps.push(`${step}:${state}`),
     });
 
@@ -181,7 +180,6 @@ describe("runUpdate", () => {
       ok: true,
       createdBranch: "tidra/deps-2026-10-31",
       previousBranch: "main",
-      commitSha: "abc123",
     });
     expect(result.touched).toEqual(["package.json", "pnpm-lock.yaml"]);
     expect(io.runs.map((r) => [r.program, ...r.args].join(" "))).toEqual([
@@ -189,11 +187,8 @@ describe("runUpdate", () => {
       "git switch -c tidra/deps-2026-10-31",
       "pnpm add react@^19.3.1",
       "pnpm run check",
-      "git add -- package.json pnpm-lock.yaml",
-      "git commit -m chore(deps): bump react 18.3.1 → 19.3.1",
-      "git rev-parse HEAD",
     ]);
-    expect(steps.filter((s) => s.endsWith(":done"))).toHaveLength(5);
+    expect(steps.filter((s) => s.endsWith(":done"))).toHaveLength(4);
     expect(steps).toContain("write:skipped");
   });
 
@@ -201,11 +196,11 @@ describe("runUpdate", () => {
     const dirty = `${CLEAN}1 .M N... 100644 100644 100644 a b src/a.ts\n`;
     const io = memoryIo({ "/r/package.json": ROOT_PKG }, { run: gitRunner(dirty) });
     const ws = await loadWorkspace(io, "/r");
-    const refused = await runUpdate(io, ws, [react], { checks: [], commit: false });
+    const refused = await runUpdate(io, ws, [react], { checks: [] });
     expect(refused).toMatchObject({ ok: false, failedStep: "preflight" });
     expect(io.files.get("/r/package.json")).toBe(ROOT_PKG);
 
-    const stashed = await runUpdate(io, ws, [react], { checks: [], commit: false, stash: true });
+    const stashed = await runUpdate(io, ws, [react], { checks: [], stash: true });
     expect(stashed.ok).toBe(true);
     expect(io.runs.some((r) => r.args[0] === "stash")).toBe(true);
   });
@@ -215,7 +210,6 @@ describe("runUpdate", () => {
     const ws = await loadWorkspace(io, "/r");
     const result = await runUpdate(io, ws, [react], {
       checks: [{ label: "check", command: scriptCommand(ws.pm, "check") }],
-      commit: true,
     });
     expect(result).toMatchObject({ ok: false, failedStep: "checks" });
     expect(result.error).toContain("npm run check exited with 1");

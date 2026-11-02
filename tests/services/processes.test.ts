@@ -65,3 +65,29 @@ describe("onExit", () => {
     expect(processes.snapshot()[0]).toMatchObject({ running: false, exitCode: 1 });
   });
 });
+
+describe("next commands", () => {
+  it("runs them in order, stops at the first failure and keeps every command in the output", async () => {
+    const io = memoryIo(
+      {},
+      { run: async (_program, args) => (args[1] === "lint" ? { code: 2, stdout: "", stderr: "" } : ok()) },
+    );
+    const { svc, close } = await testServices(io);
+    const processes = createProcessManager(svc);
+    await new Promise<void>((resolve) => {
+      processes.start({
+        label: "Checks",
+        command: { program: "pnpm", args: ["run", "typecheck"] },
+        next: [
+          { program: "pnpm", args: ["run", "lint"] },
+          { program: "pnpm", args: ["run", "test"] },
+        ],
+        onExit: resolve,
+      });
+    });
+    close();
+    expect(io.runs.map((r) => r.args[1])).toEqual(["typecheck", "lint"]);
+    expect(processes.snapshot()[0]).toMatchObject({ running: false, exitCode: 2 });
+    expect(processes.snapshot()[0]?.output).toContain("$ pnpm run lint");
+  });
+});
