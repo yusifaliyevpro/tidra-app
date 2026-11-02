@@ -3,7 +3,7 @@ import {
   chocolateyNodeUpdate,
   encodePowerShell,
   parseNodeIndex,
-  parsePnpmGlobalOutdated,
+  parsePnpmGlobals,
   parseVersionOutput,
   parseWingetUpgrades,
 } from "@/engine/toolchain";
@@ -44,12 +44,24 @@ describe("parseWingetUpgrades", () => {
   });
 });
 
-describe("parsePnpmGlobalOutdated", () => {
-  it("reads the JSON object after any warnings", () => {
-    const stdout = 'WARN something\n{"typescript":{"current":"7.0.1","latest":"7.0.2","wanted":"7.0.1"}}';
-    expect(parsePnpmGlobalOutdated(stdout)).toEqual([{ name: "typescript", current: "7.0.1", latest: "7.0.2" }]);
-    expect(parsePnpmGlobalOutdated("")).toEqual([]);
-    expect(parsePnpmGlobalOutdated("{broken")).toEqual([]);
+describe("parsePnpmGlobals", () => {
+  const list = `WARN something
+[{"path":"C:\\\\pnpm\\\\global\\\\v11","private":true,"dependencies":{
+  "vercel":{"from":"vercel","version":"65.8.0"},
+  "depcheck":{"from":"depcheck","version":"1.4.7"}}}]`;
+
+  it("lists every global package and adds latest only where it is newer", () => {
+    const outdated = 'WARN x\n{"vercel":{"current":"65.8.0","latest":"65.9.0","wanted":"65.8.0"}}';
+    expect(parsePnpmGlobals(list, outdated)).toEqual([
+      { name: "depcheck", version: "1.4.7" },
+      { name: "vercel", version: "65.8.0", latest: "65.9.0" },
+    ]);
+  });
+
+  it("still lists packages when pnpm outdated prints nothing or garbage", () => {
+    expect(parsePnpmGlobals(list, "").map((p) => p.name)).toEqual(["depcheck", "vercel"]);
+    expect(parsePnpmGlobals(list, "{broken")).toHaveLength(2);
+    expect(parsePnpmGlobals("", "")).toEqual([]);
   });
 });
 

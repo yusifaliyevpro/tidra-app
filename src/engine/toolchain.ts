@@ -42,28 +42,41 @@ export function parseWingetUpgrades(output: string): WingetUpgrade[] {
   });
 }
 
-const PnpmGlobalOutdated = z.compile(
-  z.record(z.string(), z.looseObject({ current: z.optional(z.string()), latest: z.optional(z.string()) })),
+const PnpmGlobalOutdated = z.compile(z.record(z.string(), z.looseObject({ latest: z.optional(z.string()) })));
+const PnpmGlobalList = z.compile(
+  z.array(z.looseObject({ dependencies: z.optional(z.record(z.string(), z.looseObject({ version: z.string() }))) })),
 );
 
-export interface GlobalOutdated {
+export interface GlobalPackage {
   name: string;
-  current?: string;
+  version: string;
+  /** Only set when a newer version exists. */
   latest?: string;
 }
 
-/** `pnpm outdated -g --format json`: an object keyed by package name. */
-export function parsePnpmGlobalOutdated(stdout: string): GlobalOutdated[] {
-  const start = stdout.indexOf("{");
-  if (start < 0) return [];
-  let data: unknown;
+/** The JSON document in pnpm's output, skipping any warnings printed before it. */
+function jsonAfterWarnings(stdout: string, open: "{" | "["): unknown {
+  const start = stdout.indexOf(open);
+  if (start < 0) return undefined;
   try {
-    data = JSON.parse(stdout.slice(start));
+    return JSON.parse(stdout.slice(start));
   } catch {
-    return [];
+    return undefined;
   }
-  if (!z.validate(PnpmGlobalOutdated, data)) return [];
-  return Object.entries(data).map(([name, info]) => ({ name, current: info.current, latest: info.latest }));
+}
+
+/** Every global package from `pnpm ls -g --json`, with the newer version from `pnpm outdated -g --format json`. */
+export function parsePnpmGlobals(listStdout: string, outdatedStdout: string): GlobalPackage[] {
+  const list = jsonAfterWarnings(listStdout, "[");
+  if (!z.validate(PnpmGlobalList, list)) return [];
+  const outdated = jsonAfterWarnings(outdatedStdout, "{");
+  const latest = z.validate(PnpmGlobalOutdated, outdated) ? outdated : {};
+  return Object.entries(list[0]?.dependencies ?? {})
+    .map(([name, { version }]) => {
+      const newer = latest[name]?.latest;
+      return newer && newer !== version ? { name, version, latest: newer } : { name, version };
+    })
+    .toSorted((a, b) => a.name.localeCompare(b.name));
 }
 
 const NodeIndex = z.compile(z.array(z.looseObject({ version: z.string(), lts: z.union([z.string(), z.boolean()]) })));

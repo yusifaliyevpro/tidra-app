@@ -46,11 +46,19 @@ export function createProcessManager(svc: Services) {
     },
     snapshot: (): ManagedProcess[] => snapshot,
 
-    start(input: { label: string; command: Command; cwd?: string; projectId?: string }): string {
+    start(input: {
+      label: string;
+      command: Command;
+      cwd?: string;
+      projectId?: string;
+      /** Runs once the process ends, however it ended. */
+      onExit?: () => void;
+    }): string {
+      const { onExit, ...rest } = input;
       const id = ulid();
       const abort = new AbortController();
       const proc: ManagedProcess & { abort: AbortController } = {
-        ...input,
+        ...rest,
         id,
         output: "",
         running: true,
@@ -83,7 +91,8 @@ export function createProcessManager(svc: Services) {
             proc.output += `\n${error instanceof Error ? error.message : String(error)}\n`;
             notify();
           },
-        );
+        )
+        .finally(() => onExit?.());
       return id;
     },
     stop(id: string) {

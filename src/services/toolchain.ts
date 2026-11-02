@@ -3,10 +3,10 @@ import { emptyConfig } from "@/engine/npmrc";
 import { fetchWithRetry } from "@/engine/registry";
 import {
   parseNodeIndex,
-  parsePnpmGlobalOutdated,
+  parsePnpmGlobals,
   parseVersionOutput,
   parseWingetUpgrades,
-  type GlobalOutdated,
+  type GlobalPackage,
   type WingetUpgrade,
 } from "@/engine/toolchain";
 import type { Services } from "./context";
@@ -25,7 +25,7 @@ export interface ToolInfo {
 
 export interface ToolchainSnapshot {
   tools: ToolInfo[];
-  globals: GlobalOutdated[];
+  globals: GlobalPackage[];
   winget: WingetUpgrade[];
   wingetAvailable: boolean;
   updatedAt: string;
@@ -121,13 +121,13 @@ export async function refreshToolchain(svc: Services): Promise<ToolchainSnapshot
     },
   ];
 
-  const [globalsRun, wingetRun] = await Promise.all([
-    pnpm ? svc.io.run("pnpm", ["outdated", "-g", "--format", "json"]) : undefined,
+  const [globals, wingetRun] = await Promise.all([
+    pnpm ? readGlobals(svc) : [],
     svc.io.run("winget", ["upgrade", "--include-unknown", "--disable-interactivity"]),
   ]);
   const snapshot: ToolchainSnapshot = {
     tools,
-    globals: globalsRun ? parsePnpmGlobalOutdated(globalsRun.stdout) : [],
+    globals,
     winget: wingetRun.code === null ? [] : parseWingetUpgrades(wingetRun.stdout),
     wingetAvailable: wingetRun.code !== null,
     updatedAt: new Date().toISOString(),
@@ -138,3 +138,19 @@ export async function refreshToolchain(svc: Services): Promise<ToolchainSnapshot
 }
 
 export const readToolchain = async (svc: Services) => (await readSnapshot<ToolchainSnapshot>(svc, "toolchain"))?.data;
+
+async function readGlobals(svc: Services): Promise<GlobalPackage[]> {
+  const [list, outdated] = await Promise.all([
+    svc.io.run("pnpm", ["ls", "-g", "--json"]),
+    svc.io.run("pnpm", ["outdated", "-g", "--format", "json"]),
+  ]);
+  return parsePnpmGlobals(list.stdout, outdated.stdout);
+}
+
+/** After updating or removing a global package: reads only the globals again, not the whole toolchain. */
+export async function refreshGlobals(svc: Services): Promise<void> {
+  const [current, globals] = await Promise.all([readToolchain(svc), readGlobals(svc)]);
+  if (!current) return;
+  await writeSnapshot(svc, "toolchain", { ...current, globals });
+  await svc.queryClient.invalidateQueries({ queryKey: ["toolchain"] });
+}

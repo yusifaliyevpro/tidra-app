@@ -1,15 +1,18 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Copy, Play } from "lucide-react";
+import { cn } from "cn";
+import { Copy, Play, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useToolchain } from "@/app/queries";
 import { useApp, useServices } from "@/app/services";
 import { parseCommandLine } from "@/engine/pm";
-import { chocolateyNodeUpdate } from "@/engine/toolchain";
+import { chocolateyNodeUpdate, type GlobalPackage } from "@/engine/toolchain";
 import { JobRefresh } from "@/modules/common";
 import { ProcessDialog } from "@/modules/process-dialog";
+import { refreshGlobals } from "@/services/toolchain";
 import { Badge } from "@/ui/badge";
 import { Button, IconButton } from "@/ui/button";
+import { Dialog } from "@/ui/dialog";
 import { Card, Note, Page, Section } from "@/ui/layout";
 import { Mono } from "@/ui/misc";
 import { toast, toastError } from "@/ui/toast";
@@ -21,9 +24,9 @@ function Toolchain() {
   const { data } = useToolchain();
   const [shown, setShown] = useState<string>();
 
-  const runCommand = (label: string, line: string) => {
+  const runCommand = (label: string, line: string, onExit?: () => void) => {
     const command = parseCommandLine(line);
-    if (command) setShown(processes.start({ label, command }));
+    if (command) setShown(processes.start({ label, command, onExit }));
   };
 
   return (
@@ -73,25 +76,7 @@ function Toolchain() {
         </Section>
 
         <Section title="Global pnpm packages">
-          <Card>
-            {(data?.globals ?? []).length === 0 ? (
-              <p className="p-4 text-sm text-muted">Every global package is up to date.</p>
-            ) : null}
-            {(data?.globals ?? []).map((pkg) => (
-              <div
-                key={pkg.name}
-                className="flex h-10 items-center gap-3 border-b border-line px-4 text-sm last:border-b-0"
-              >
-                <span className="flex-1 font-medium">{pkg.name}</span>
-                <Mono className="text-muted">{pkg.current}</Mono>
-                <span className="text-faint">→</span>
-                <Mono className="text-warn">{pkg.latest}</Mono>
-                <Button size="sm" onClick={() => runCommand(`Update ${pkg.name}`, `pnpm add -g ${pkg.name}@latest`)}>
-                  Update
-                </Button>
-              </div>
-            ))}
-          </Card>
+          <GlobalPackages packages={data?.globals ?? []} runCommand={runCommand} />
         </Section>
 
         <Section title="winget upgrades">
@@ -107,7 +92,7 @@ function Toolchain() {
                   key={pkg.id}
                   className="flex h-10 items-center gap-3 border-b border-line px-4 text-sm last:border-b-0"
                 >
-                  <span className="min-w-0 flex-1 truncate font-medium">{pkg.name}</span>
+                  <CopyName name={pkg.name} className="min-w-0 flex-1" />
                   <Mono className="text-xs text-faint">{pkg.id}</Mono>
                   <Mono className="text-muted">{pkg.version}</Mono>
                   <span className="text-faint">→</span>
@@ -130,6 +115,101 @@ function Toolchain() {
         </Section>
       </div>
     </Page>
+  );
+}
+
+type RunCommand = (label: string, line: string, onExit?: () => void) => void;
+
+function GlobalPackages({ packages, runCommand }: { packages: GlobalPackage[]; runCommand: RunCommand }) {
+  const svc = useServices();
+  const [removing, setRemoving] = useState<string>();
+  // Whatever the command did, the rows should show what is installed now.
+  const recheck = () => void refreshGlobals(svc).catch(toastError);
+  return (
+    <Card>
+      <RemoveGlobalDialog
+        name={removing}
+        onClose={() => setRemoving(undefined)}
+        onConfirm={(name) => {
+          setRemoving(undefined);
+          runCommand(`Remove ${name}`, `pnpm remove -g ${name}`, recheck);
+        }}
+      />
+      {packages.length === 0 ? <p className="p-4 text-sm text-muted">No global packages</p> : null}
+      {packages.map((pkg) => (
+        <div
+          key={pkg.name}
+          className="flex h-10 items-center gap-3 border-b border-line pr-2 pl-4 text-sm last:border-b-0"
+        >
+          <CopyName name={pkg.name} className="min-w-0 flex-1" />
+          <Mono className="w-24 text-right text-muted">{pkg.version}</Mono>
+          <span className="flex w-52 items-center gap-3">
+            {pkg.latest ? (
+              <>
+                <span className="text-faint">→</span>
+                <Mono className="flex-1 text-warn">{pkg.latest}</Mono>
+                <Button
+                  size="sm"
+                  onClick={() => runCommand(`Update ${pkg.name}`, `pnpm add -g ${pkg.name}@${pkg.latest}`, recheck)}
+                >
+                  Update
+                </Button>
+              </>
+            ) : null}
+          </span>
+          <IconButton
+            size="sm"
+            label={`Remove ${pkg.name}`}
+            icon={<Trash2 className="size-3.5" />}
+            onClick={() => setRemoving(pkg.name)}
+          />
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+function RemoveGlobalDialog({
+  name,
+  onClose,
+  onConfirm,
+}: {
+  name: string | undefined;
+  onClose: () => void;
+  onConfirm: (name: string) => void;
+}) {
+  return (
+    <Dialog
+      open={Boolean(name)}
+      onClose={onClose}
+      title={`Remove ${name ?? ""}`}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="danger" onClick={() => name && onConfirm(name)}>
+            Remove
+          </Button>
+        </>
+      }
+    >
+      <p className="text-sm text-muted">
+        Runs <Mono>pnpm remove -g {name}</Mono>. Projects that depend on it keep their own copy.
+      </p>
+    </Dialog>
+  );
+}
+
+/** A package name that copies itself when clicked. */
+function CopyName({ name, className }: { name: string; className?: string }) {
+  return (
+    <button
+      type="button"
+      title="Copy name"
+      className={cn("truncate text-left font-medium hover:text-fg", className)}
+      onClick={() => void navigator.clipboard.writeText(name).then(() => toast(`Copied ${name}.`))}
+    >
+      {name}
+    </button>
   );
 }
 

@@ -51,3 +51,17 @@ describe("process manager failures", () => {
     expect(proc?.output).toContain("pnpm was not found on PATH");
   });
 });
+
+describe("onExit", () => {
+  it("runs once the process ends, even when it failed", async () => {
+    const io = memoryIo({}, { run: async () => ({ code: 1, stdout: "", stderr: "ERR_PNPM" }) });
+    const { svc, close } = await testServices(io);
+    const processes = createProcessManager(svc);
+    const exited = new Promise<void>((resolve) => {
+      processes.start({ label: "update", command: { program: "pnpm", args: ["add", "-g", "x"] }, onExit: resolve });
+    });
+    await exited;
+    close();
+    expect(processes.snapshot()[0]).toMatchObject({ running: false, exitCode: 1 });
+  });
+});
