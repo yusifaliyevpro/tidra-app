@@ -17,33 +17,45 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 12.x
+      # The Node and Rust toolchains don't depend on each other, so each group sets up one step of both.
+      - parallel:
+          - name: Setup pnpm
+            uses: pnpm/action-setup@v6
+            with:
+              version: 12.x
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
+          - name: Setup Rust
+            uses: dtolnay/rust-toolchain@stable
+            with:
+              components: rustfmt, clippy
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      # setup-node's pnpm cache needs pnpm on PATH, hence the group above.
+      - parallel:
+          - name: Setup Node.js
+            uses: actions/setup-node@v7
+            with:
+              node-version: 24
+              cache: pnpm
 
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
+          - name: Cache Rust build
+            uses: Swatinem/rust-cache@v2
+            with:
+              workspaces: src-tauri
 
       - parallel:
-          - name: Run Checks
-            run: pnpm check
+          - name: Install
+            run: pnpm install --frozen-lockfile
+
+          - name: Fetch Rust crates
+            run: cargo fetch --manifest-path src-tauri/Cargo.toml
+
+      # Same checks as a local `pnpm check`, split by toolchain so the Rust build doesn't wait on Vitest.
+      - parallel:
+          - name: Run JS checks
+            run: pnpm check typescript oxfmt oxlint vitest react-doctor
+
+          - name: Run Rust checks
+            run: pnpm check rustfmt clippy cargo-test
 
           - name: Audit dependencies
             # Print every advisory, fail only on high or critical in shipped code.
