@@ -146,7 +146,7 @@ Open:
 
 ## Releasing
 
-Bump `version` in `package.json` and push to `main`; that is the whole release. `release.yml` sees the new version (no `v<version>` tag yet), creates a draft release with GitHub's generated notes, builds and signs Windows, macOS (universal) and Linux, uploads installers and `latest.json`, then publishes the release, which creates the tag. Installed apps only see published releases. A failed run leaves a draft that the next run (or "Run workflow") replaces. `package.json` is the only version: `tauri.conf.json` reads it, and the crate version in `Cargo.toml` is a fixed `0.0.0`.
+Bump `version` in `package.json`, update the README's download links to the same version (`tests/readme.test.ts` fails until they match) and push to `main`; that is the whole release. `release.yml` sees the new version (no `v<version>` tag yet), creates a draft release with GitHub's generated notes, builds and signs Windows, macOS (universal) and Linux, uploads installers and `latest.json`, then publishes the release, which creates the tag. Installed apps only see published releases. A failed run leaves a draft that the next run (or "Run workflow") replaces. `package.json` is the only version: `tauri.conf.json` reads it, and the crate version in `Cargo.toml` is a fixed `0.0.0`.
 
 ## Release signing
 

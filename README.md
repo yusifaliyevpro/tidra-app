@@ -4,6 +4,21 @@
 
 <p align="center">Keep every project you maintain up to date, from one desktop app.</p>
 
+<p align="center">
+  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.2/Tidra_0.1.2_x64-setup.exe"><img src="https://img.shields.io/badge/Windows-Download-3a74d8?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" /></a>
+  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.2/Tidra_0.1.2_universal.dmg"><img src="https://img.shields.io/badge/macOS-Download-3a74d8?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
+  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.2/Tidra_0.1.2_amd64.AppImage"><img src="https://img.shields.io/badge/Linux-Download-3a74d8?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux (AppImage)" /></a>
+</p>
+
+<p align="center">
+  <sub>
+    Windows x64 · macOS (Apple silicon and Intel) · Linux x64:
+    <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.2/Tidra_0.1.2_amd64.deb">.deb</a>,
+    <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.2/Tidra-0.1.2-1.x86_64.rpm">.rpm</a>,
+    <a href="https://github.com/yusifaliyevpro/tidra-app/releases/latest">all releases</a>
+  </sub>
+</p>
+
 ---
 
 Tidra watches the projects on your machine and tells you what needs attention: outdated dependencies, what changed upstream, security advisories, failing CI, pull requests waiting for you, and broken deploys. When it's time to update, it edits your manifests, installs and runs your checks, then you review and commit with one click, without opening an editor.
@@ -13,6 +28,16 @@ Tidra watches the projects on your machine and tells you what needs attention: o
 </p>
 
 > Status: early development. Not ready for daily use yet.
+
+## Install
+
+Download the installer for your system with the buttons above. Tidra updates itself after that: it checks for a new version at launch and every few hours, and "Update to x.y.z" appears next to the search box. On Linux the AppImage updates in place; the `.deb` and `.rpm` update too, but ask for your password to install.
+
+The installers are not code-signed yet, so the first launch shows a warning:
+
+- **Windows**: SmartScreen says "Windows protected your PC". Click **More info**, then **Run anyway**. The installer sets Tidra up for your user only, without an administrator prompt.
+- **macOS**: open the `.dmg` and drag Tidra to Applications. If macOS says Tidra can't be opened, go to **System Settings → Privacy & Security** and click **Open Anyway**. If it says the app is damaged, run `xattr -cr /Applications/Tidra.app` in Terminal once.
+- **Linux**: make the AppImage executable (`chmod +x Tidra_*_amd64.AppImage`) and run it, or install the `.deb` / `.rpm` from the links above.
 
 ## Features
 
