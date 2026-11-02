@@ -4,11 +4,13 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 use tauri::State;
 use tauri::ipc::Channel;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
 #[derive(Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -75,6 +77,23 @@ async fn pump<R: AsyncRead + Unpin>(mut reader: R, channel: Channel<ProcEvent>, 
     }
 }
 
+/// A helper the child started (git's credential manager, background maintenance) can inherit its pipes and hold them
+/// open long after it exits, so output gets a short grace period instead of holding back the exit event forever.
+const PIPE_GRACE: Duration = Duration::from_secs(2);
+
+async fn drain_pipes(tasks: Vec<JoinHandle<()>>, grace: Duration) {
+    let aborts: Vec<_> = tasks.iter().map(JoinHandle::abort_handle).collect();
+    if tokio::time::timeout(grace, join_all(tasks)).await.is_err() {
+        aborts.iter().for_each(|abort| abort.abort());
+    }
+}
+
+async fn join_all(tasks: Vec<JoinHandle<()>>) {
+    for task in tasks {
+        let _ = task.await;
+    }
+}
+
 fn kill_tree(pid: u32) {
     #[cfg(windows)]
     {
@@ -128,9 +147,7 @@ pub async fn proc_spawn(
                 child.wait().await.ok()
             }
         };
-        for task in [stdout, stderr].into_iter().flatten() {
-            let _ = task.await;
-        }
+        drain_pipes([stdout, stderr].into_iter().flatten().collect(), PIPE_GRACE).await;
         let _ = on_event.send(ProcEvent::Exit { code: status.and_then(|s| s.code()) });
     });
 
@@ -159,6 +176,16 @@ pub fn proc_which(program: String) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn exit_is_not_held_back_by_a_pipe_that_never_closes() {
+        let stuck = tokio::spawn(std::future::pending::<()>());
+        let done = tokio::spawn(async {});
+        let drained =
+            tokio::time::timeout(Duration::from_secs(1), drain_pipes(vec![stuck, done], Duration::from_millis(50)))
+                .await;
+        assert!(drained.is_ok());
+    }
 
     #[test]
     fn boundary_keeps_complete_text() {

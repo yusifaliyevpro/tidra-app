@@ -17,6 +17,7 @@ import { createServices } from "@/services/context";
 import { homeSummary } from "@/services/home";
 import { registerJobs } from "@/services/jobs";
 import { createProcessManager } from "@/services/processes";
+import { finishInterruptedRuns } from "@/services/updates";
 import { toast, toastError } from "@/ui/toast";
 import { routeTree } from "./routeTree.gen";
 
@@ -57,6 +58,7 @@ reportUnhandledErrors((message) => toast(message, "error"));
 try {
   const app = await boot();
   await applyAppearance(app.svc);
+  await finishInterruptedRuns(app.svc);
   await registerJobs(app.svc);
   app.svc.scheduler.start();
   // Known before the first render, so the onboarding gate never flashes a spinner.

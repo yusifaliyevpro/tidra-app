@@ -33,7 +33,9 @@ export async function spawn(program: string, args: string[], options: RunOptions
     onEvent: channel,
   });
   const abort = () => void invoke("proc_kill", { id });
-  options.signal?.addEventListener("abort", abort, { once: true });
+  // The signal can fire while the spawn is in flight; the listener alone would miss it.
+  if (options.signal?.aborted) abort();
+  else options.signal?.addEventListener("abort", abort, { once: true });
   try {
     return { code: await promise, stdout, stderr };
   } finally {

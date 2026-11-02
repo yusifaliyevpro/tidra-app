@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { ulid } from "ulid";
 import { runs } from "@/core/db/schema";
 import {
@@ -73,7 +73,7 @@ async function launchUpdate(svc: Services, projectId: string, picks: UpdatePick[
   const progress: RunProgress = { runId, steps: {}, log: "" };
   emitRun(progress);
 
-  const done = (async () => {
+  const work = (async () => {
     const workspace = await loadWorkspace(svc.io, path);
     const selections: Selection[] = picks;
     const plan = await updateBranchPlan(svc, { ...project, path: workspace.root }, branchName());
@@ -125,6 +125,18 @@ Could not open a pull request: ${error instanceof Error ? error.message : String
     await svc.queryClient.invalidateQueries({ queryKey: ["runs", projectId] });
     return progress;
   })();
+  // A run that throws before it records a result would otherwise show as running forever.
+  const done = work.catch(async (error: unknown) => {
+    progress.log += `${error instanceof Error ? error.message : String(error)}
+`;
+    emitRun(progress);
+    await svc.store.db
+      .update(runs)
+      .set({ finishedAt: new Date().toISOString(), ok: false, log: progress.log })
+      .where(and(eq(runs.id, runId), isNull(runs.finishedAt)));
+    svc.invalidate(["runs", projectId], ["home"]);
+    throw error;
+  });
 
   return { runId, done };
 }
@@ -210,6 +222,16 @@ export async function revertRun(svc: Services, projectId: string, result: Update
   const workspace = await loadWorkspace(svc.io, project.path);
   await revertUpdate(svc.io, workspace, result);
   await refreshProject(svc, projectId);
+}
+
+const INTERRUPTED = "\nTidra closed before this update finished.\n";
+
+/** Runs still open at launch were cut off when the app quit; nothing will ever finish them. */
+export async function finishInterruptedRuns(svc: Services): Promise<void> {
+  await svc.store.db
+    .update(runs)
+    .set({ finishedAt: new Date().toISOString(), ok: false, log: sql`${runs.log} || ${INTERRUPTED}` })
+    .where(isNull(runs.finishedAt));
 }
 
 export async function listRuns(svc: Services, projectId: string) {
