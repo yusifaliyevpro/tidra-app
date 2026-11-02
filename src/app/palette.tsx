@@ -147,7 +147,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
           className="h-full min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-faint"
         />
       </div>
-      <Command.List className="min-h-0 overflow-y-auto p-1.5">
+      <Command.List className="min-h-0 overflow-y-auto overscroll-contain p-1.5">
         <Command.Empty className="px-3 py-6 text-center text-sm text-muted">No matches</Command.Empty>
         {pkg ? (
           <PackageUses

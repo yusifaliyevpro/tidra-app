@@ -53,7 +53,7 @@ export function Dialog({
             </h2>
             <IconButton label="Close" className="ml-auto" icon={<X className="size-4" />} onClick={onClose} />
           </div>
-          <div className="min-h-0 overflow-y-auto p-4">{children}</div>
+          <div className="min-h-0 overflow-y-auto overscroll-contain p-4">{children}</div>
           {footer ? (
             <div className="flex shrink-0 justify-end gap-2 border-t border-line px-4 py-3">{footer}</div>
           ) : null}

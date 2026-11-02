@@ -83,7 +83,7 @@ Rules:
 
 - The window starts hidden. `revealWindow()` (`src/app/native-feel.ts`) calls the `app_ready` command after the first frame with final fonts; Rust shows it then, or after a 5 s fallback. Autostart (`--hidden`) launches stay in the tray. window-state must not restore visibility.
 - `installNativeFeel()` blocks browser keys (reload, print, find, zoom, view source, history), the browser context menu outside text, and mouse back/forward. Devtools stay available in dev builds.
-- CSS: `overscroll-behavior: none` everywhere (no rubber-band at scroll ends), arrow cursor on controls, no image/link dragging, text selectable only in inputs, code, logs and `[data-selectable]`.
+- CSS: `overscroll-behavior: none` on `html`/`body` only (no rubber-band; on every element it would stop nested lists passing the scroll to the page), `overscroll-contain` on dialogs, menus and the palette, arrow cursor on controls, no image/link dragging, text selectable only in inputs, code, logs and `[data-selectable]`.
 - Spinners fade in after 250 ms (`appear-late`), so quick loads never flash one. Prefetch anything the first frame needs (see the `onboarded` prefetch in `src/main.tsx`).
 - Screens outside the shell (onboarding, startup error, crashed route) render inside `Frame` so the title bar and window buttons are always there. Route errors render in place with the shell intact (`RouteError`).
 

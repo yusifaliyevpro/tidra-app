@@ -73,7 +73,7 @@ export function Popover({
                   : { top: position.top, left: position.left }
               }
               className={cn(
-                "fixed z-50 flex max-h-[min(420px,70vh)] flex-col overflow-hidden rounded-lg border border-line-strong bg-raised shadow-xl shadow-black/40",
+                "fixed z-50 flex max-h-[min(420px,70vh)] flex-col overflow-hidden overscroll-contain rounded-lg border border-line-strong bg-raised shadow-xl shadow-black/40",
                 className,
               )}
             >

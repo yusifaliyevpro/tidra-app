@@ -73,10 +73,9 @@
     overflow: hidden;
   }
 
-  /* No rubber-band bounce at scroll ends; native lists stop dead. */
-  *,
-  *::before,
-  *::after {
+  /* No rubber-band at the root; inner lists keep chaining so the page scrolls on past them. */
+  html,
+  body {
     overscroll-behavior: none;
   }
 
