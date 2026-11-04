@@ -110,4 +110,14 @@ describe("commitProject", () => {
       git.findIndex((l) => l.startsWith("commit -m")),
     );
   });
+
+  it("refreshes the project only after the push, so the screen never shows the half-done state", async () => {
+    const { io, svc, close } = await stoppedUpdate("chore(deps): bump 2 dependencies");
+    await commitAndPushProject(svc, "p1");
+    close();
+    const git = io.runs.map((r) => r.args.join(" "));
+    const commit = git.findIndex((l) => l.startsWith("commit -m"));
+    const push = git.indexOf("push --set-upstream origin tidra/deps-1");
+    expect(git.slice(commit, push).some((l) => l.startsWith("for-each-ref"))).toBe(false);
+  });
 });

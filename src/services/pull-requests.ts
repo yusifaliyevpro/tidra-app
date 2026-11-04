@@ -23,6 +23,12 @@ export const hasUnpushed = (git: GitStatus | undefined) =>
  * comes from the latest update not committed yet; that run is then marked, so its message is used once.
  */
 export async function commitProject(svc: Services, projectId: string): Promise<string> {
+  const subject = await commitChanges(svc, projectId);
+  await refreshRepo(svc, projectId);
+  return subject;
+}
+
+async function commitChanges(svc: Services, projectId: string): Promise<string> {
   const project = await svc.store.getProject(projectId);
   if (!project?.path) throw new Error("This project has no folder on this device.");
   const root = project.subdir ? project.path.slice(0, -(project.subdir.length + 1)) : project.path;
@@ -40,10 +46,14 @@ export async function commitProject(svc: Services, projectId: string): Promise<s
       .set({ result: { ...pending.result, commitSha } })
       .where(eq(runs.id, pending.id));
   }
+  return message.split("\n")[0] ?? message;
+}
+
+/** Rereads git state for every package of the project's repo. */
+async function refreshRepo(svc: Services, projectId: string) {
   const members = (await listRepos(svc)).find((r) => r.projects.some((p) => p.id === projectId))?.projects ?? [];
   const gitCache: GitInfoCache = new Map();
   await Promise.all(members.map((p) => refreshProject(svc, p.id, { gitCache })));
-  return message.split("\n")[0] ?? message;
 }
 
 /** An update left its changes uncommitted, so the project page offers Commit on any branch. */
@@ -62,15 +72,22 @@ async function pendingRun(svc: Services, projectId: string) {
   return typeof message === "string" && commitSha === undefined ? { id: latest.id, message, result } : undefined;
 }
 
-/** Commit, then push: the one-click way out of an update that stopped at its checks. */
+/** Commit, then push, refreshing once at the end: in between, the screen would briefly offer a lone Push. */
 export async function commitAndPushProject(svc: Services, projectId: string): Promise<string> {
-  const message = await commitProject(svc, projectId);
-  const branch = await pushProject(svc, projectId);
+  const message = await commitChanges(svc, projectId);
+  const branch = await pushBranch(svc, projectId);
+  await refreshRepo(svc, projectId);
   return `Committed "${message}" and pushed ${branch}.`;
 }
 
-/** Pushes the current branch to origin, setting it as upstream, whatever the project's push setting says. */
+/** Pushes the current branch to origin, setting it as upstream. */
 export async function pushProject(svc: Services, projectId: string): Promise<string> {
+  const branch = await pushBranch(svc, projectId);
+  await refreshRepo(svc, projectId);
+  return branch;
+}
+
+async function pushBranch(svc: Services, projectId: string): Promise<string> {
   const project = await svc.store.getProject(projectId);
   if (!project?.path) throw new Error("This project has no folder on this device.");
   const git = createGit(svc.io, project.path);
@@ -78,9 +95,6 @@ export async function pushProject(svc: Services, projectId: string): Promise<str
   if (!branch) throw new Error("HEAD is detached. Switch to a branch first.");
   await git.push(branch);
   await syncPullRequest(svc, project.path, project.remote).catch(() => undefined);
-  const members = (await listRepos(svc)).find((r) => r.projects.some((p) => p.id === projectId))?.projects ?? [];
-  const gitCache: GitInfoCache = new Map();
-  await Promise.all(members.map((p) => refreshProject(svc, p.id, { gitCache })));
   return branch;
 }
 
@@ -160,21 +174,21 @@ export async function updateBranchPlan(
   return { branch: newBranch };
 }
 
-/** Commits on HEAD that the target's default branch doesn't have, oldest first. */
+/** Commit messages on HEAD that the target's default branch doesn't have, oldest first. */
 async function commitsForPull(git: ReturnType<typeof createGit>, target: PullTarget, base: string) {
   if (target.remote === "upstream") await git.run(["fetch", "upstream", base]).catch(() => undefined);
-  return git.subjectsSince(`${target.remote}/${base}`).catch(() => [] as string[]);
+  return git.messagesSince(`${target.remote}/${base}`).catch(() => [] as string[]);
 }
 
 async function refreshDescription(
   svc: Services,
   target: PullTarget,
   pull: Extract<PullState, { state: "open" }>,
-  subjects: string[],
+  messages: string[],
 ) {
-  if (subjects.length === 0) return;
-  const body = pullBody(subjects, pull.body);
-  const title = nextPullTitle(pull.title, subjects);
+  if (messages.length === 0) return;
+  const body = pullBody(messages, pull.body);
+  const title = nextPullTitle(pull.title, messages);
   if (body === pull.body && !title) return;
   await (await svc.github()).updatePull(target.repo, pull.number, { title, body });
 }
@@ -213,23 +227,21 @@ export async function openPullRequest(svc: Services, projectId: string): Promise
   }
   await git.push(branch);
 
-  const [existing, subjects] = await Promise.all([
+  const [existing, messages] = await Promise.all([
     pullFor(svc, target, branch),
     commitsForPull(git, target, repo.default_branch),
   ]);
   if (existing.state === "open") {
-    await refreshDescription(svc, target, existing, subjects);
+    await refreshDescription(svc, target, existing, messages);
     return { url: existing.url, created: false };
   }
 
   const pull = await github.createPull(repo.full_name, {
-    title: pullTitle(subjects),
+    title: pullTitle(messages),
     head: `${target.headOwner}:${branch}`,
     base: repo.default_branch,
-    body: pullBody(subjects),
+    body: pullBody(messages),
   });
-  const members = (await listRepos(svc)).find((r) => r.projects.some((p) => p.id === projectId))?.projects ?? [];
-  const gitCache: GitInfoCache = new Map();
-  await Promise.all(members.map((p) => refreshProject(svc, p.id, { gitCache })));
+  await refreshRepo(svc, projectId);
   return { url: pull.html_url, created: true };
 }
