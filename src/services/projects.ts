@@ -100,14 +100,18 @@ function readGitInfo(svc: Services, project: ProjectWithPath & { path: string },
   const root = project.subdir ? project.path.slice(0, -(project.subdir.length + 1)) : project.path;
   const hit = cache?.get(root);
   if (hit) return hit;
+  const info = gitInfoAt(svc, root);
+  cache?.set(root, info);
+  return info;
+}
+
+function gitInfoAt(svc: Services, root: string): Promise<GitInfo> {
   const git = createGit(svc.io, root);
-  const info = Promise.all([
+  return Promise.all([
     git.status().catch(() => undefined),
     git.branches().catch(() => []),
     git.fork().catch(() => undefined),
   ]);
-  cache?.set(root, info);
-  return info;
 }
 
 export async function buildReport(
@@ -131,7 +135,8 @@ export async function buildReport(
       error: "This project has no folder on this device yet.",
     };
   }
-  const [gitStatus, branches, fork] = await readGitInfo(svc, { ...project, path: project.path }, gitCache);
+  // Git (possibly waiting on a fetch) and the registry run side by side.
+  const gitInfo = readGitInfo(svc, { ...project, path: project.path }, gitCache);
   try {
     const workspace = await loadWorkspace(svc.io, project.path);
     const reuse =
@@ -145,6 +150,7 @@ export async function buildReport(
       : await computeOutdated(workspace, svc.registry(workspace.npm), {
           majorPins: project.majorPins ?? DEFAULT_MAJOR_PINS,
         });
+    const [gitStatus, branches, fork] = await gitInfo;
     return {
       ...base,
       fingerprint: workspace.fingerprint,
@@ -170,6 +176,7 @@ export async function buildReport(
       ),
     };
   } catch (error) {
+    const [gitStatus, branches, fork] = await gitInfo;
     return {
       ...base,
       pm: { name: "npm", yarnBerry: false },
@@ -202,12 +209,23 @@ export async function refreshProject(
   return report;
 }
 
-/** A few projects at a time: each one already fans out registry requests through the shared limiter. */
+/**
+ * Fetches and registry lookups overlap: each checkout's git state waits only for its own fetch, while the registry
+ * work of every project starts right away (a few projects at a time, sharing the registry limiter).
+ */
 export async function refreshAllProjects(svc: Services, signal?: AbortSignal): Promise<void> {
   const limit = createLimit(4);
+  const fetchLimit = createLimit(8);
   const projects = await svc.store.listProjects();
-  await fetchCheckouts(svc, projects, signal);
   const gitCache: GitInfoCache = new Map();
+  const roots = new Set(projects.flatMap((p) => (p.remote ? [checkoutRoot(p) ?? ""] : [])).filter(Boolean));
+  for (const root of roots) {
+    const fetched = fetchLimit(async () => (signal?.aborted ? undefined : fetchCheckout(svc, root, signal)));
+    gitCache.set(
+      root,
+      fetched.then(() => gitInfoAt(svc, root)),
+    );
+  }
   await Promise.all(
     projects.map((project) =>
       limit(async () => (signal?.aborted ? undefined : refreshProject(svc, project.id, { gitCache }))),
@@ -226,18 +244,9 @@ const checkoutRoot = (p: ProjectWithPath) => (p.path && p.subdir ? p.path.slice(
 async function fetchCheckout(svc: Services, root: string, signal?: AbortSignal) {
   const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
   await createGit(svc.io, root)
-    .raw(["fetch", "--all", "--prune", "--quiet"], { signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
+    .fetch({ signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
     .catch(() => undefined);
   lastFetched.set(root, Date.now());
-}
-
-/** Keeps ahead/behind counts (and the Sync button) current; one quiet fetch per checkout, failures ignored. */
-async function fetchCheckouts(svc: Services, projects: ProjectWithPath[], signal?: AbortSignal) {
-  const roots = new Set(projects.flatMap((p) => (p.remote ? [checkoutRoot(p) ?? ""] : [])).filter(Boolean));
-  const limit = createLimit(4);
-  await Promise.all(
-    [...roots].map((root) => limit(async () => (signal?.aborted ? undefined : fetchCheckout(svc, root, signal)))),
-  );
 }
 
 /**

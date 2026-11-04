@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { checkCommands, refreshProject } from "@/services/projects";
-import { jsonResponse, memoryIo, packument } from "../support/memory-io";
+import { checkCommands, refreshAllProjects, refreshProject } from "@/services/projects";
+import { jsonResponse, memoryIo, ok, packument } from "../support/memory-io";
 import { testServices } from "../support/services";
 
 describe("refreshProject", () => {
@@ -38,6 +38,39 @@ describe("refreshProject", () => {
     expect(second?.outdated).toEqual(first?.outdated);
     expect(second?.checkedAt).toBe(first?.checkedAt);
     expect(forced?.checkedAt).not.toBe(first?.checkedAt);
+  });
+});
+
+describe("refreshAllProjects", () => {
+  it("fetches each checkout once and reads its git state only after that fetch", async () => {
+    const io = memoryIo(
+      {
+        "/mono/apps/web/package.json": JSON.stringify({ name: "web" }),
+        "/mono/apps/api/package.json": JSON.stringify({ name: "api" }),
+      },
+      { run: (_program, args) => (args.join(" ") === "remote" ? ok("origin\n") : ok()) },
+    );
+    const { svc, close } = await testServices(io);
+    await svc.store.addProject({
+      id: "w",
+      name: "web",
+      remote: "github.com/me/mono",
+      subdir: "apps/web",
+      path: "/mono/apps/web",
+    });
+    await svc.store.addProject({
+      id: "a",
+      name: "api",
+      remote: "github.com/me/mono",
+      subdir: "apps/api",
+      path: "/mono/apps/api",
+    });
+    await refreshAllProjects(svc);
+    close();
+    const lines = io.runs.map((r) => r.args[0]);
+    expect(lines.filter((l) => l === "fetch")).toHaveLength(1);
+    expect(lines.filter((l) => l === "status")).toHaveLength(1);
+    expect(lines.indexOf("status")).toBeGreaterThan(lines.indexOf("fetch"));
   });
 });
 

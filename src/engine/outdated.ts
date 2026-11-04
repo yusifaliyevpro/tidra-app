@@ -129,6 +129,16 @@ export function pickLatest(
   return { version: fallback, heldBackByAge: true };
 }
 
+/**
+ * Most dependencies are up to date, and their dist-tags say so in a few bytes, sparing a document that can be tens
+ * of MB. Prerelease channels and major pins need the version list, so they always take the long way.
+ */
+async function onLatest(registry: RegistryClient, name: string, current: string | undefined, pins: Set<string>) {
+  if (!current || semver.prerelease(current) || pins.has(name)) return false;
+  const latest = (await registry.distTags(name))?.latest;
+  return latest !== undefined && semver.valid(latest) !== null && semver.gte(current, latest);
+}
+
 export async function computeOutdated(
   workspace: Workspace,
   registry: RegistryClient,
@@ -143,6 +153,7 @@ export async function computeOutdated(
     collectCandidates(workspace).map(async (candidate): Promise<OutdatedEntry | undefined> => {
       try {
         const current = candidate.current ?? semver.minVersion(candidate.range)?.version;
+        if (!options.includeUpToDate && (await onLatest(registry, candidate.name, current, pins))) return undefined;
         const abbreviated = await registry.abbreviated(candidate.name);
         if (!abbreviated) return undefined;
         const minAge = ageExclude.has(candidate.name) ? 0 : workspace.minimumReleaseAgeMinutes;

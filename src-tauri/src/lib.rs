@@ -3,6 +3,7 @@ mod env_path;
 mod fs;
 mod ports;
 mod proc;
+mod registry;
 mod secrets;
 mod tray;
 
@@ -68,6 +69,7 @@ pub fn run() {
             fs::fs_exists,
             fs::app_env,
             ports::ports_list,
+            registry::registry_fetch,
             tray::tray_set_attention,
         ])
         .setup(|app| {

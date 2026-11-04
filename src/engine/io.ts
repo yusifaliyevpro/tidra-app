@@ -26,6 +26,8 @@ export interface Io {
   exists(path: string): Promise<boolean>;
   run(program: string, args: string[], options?: RunOptions): Promise<RunResult>;
   fetch: typeof globalThis.fetch;
+  /** A fetch for npm registry reads; package documents come back trimmed (the app does it natively). */
+  fetchPackument?: typeof globalThis.fetch;
   env: Readonly<Record<string, string | undefined>>;
   homeDir: string;
 }

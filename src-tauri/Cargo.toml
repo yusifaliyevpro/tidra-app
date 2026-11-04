@@ -33,6 +33,8 @@ keyring = { version = "3", features = ["windows-native", "apple-native", "sync-s
 listeners = "0.6"
 rusqlite = { version = "0.41", features = ["bundled"] }
 which = "8"
+# Same version as tauri-plugin-http's; registry documents come 5-10x smaller compressed.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "gzip", "brotli"] }
 
 [profile.dev]
 incremental = true

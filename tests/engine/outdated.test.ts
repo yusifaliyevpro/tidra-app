@@ -7,12 +7,16 @@ import { memoryIo, packument } from "../support/memory-io";
 const NOW = new Date("2026-10-31T12:00:00Z");
 const daysAgo = (days: number) => new Date(NOW.getTime() - days * 86_400_000).toISOString();
 
-function fakeRegistry(docs: Packument[]): RegistryClient & { fullCalls: string[] } {
+function fakeRegistry(docs: Packument[]): RegistryClient & { fullCalls: string[]; abbreviatedCalls: string[] } {
   const byName = new Map(docs.map((d) => [d.name, d]));
   const fullCalls: string[] = [];
+  const abbreviatedCalls: string[] = [];
   return {
     fullCalls,
+    abbreviatedCalls,
+    distTags: async (name) => byName.get(name)?.["dist-tags"],
     abbreviated: async (name) => {
+      abbreviatedCalls.push(name);
       const doc = byName.get(name);
       return doc ? { ...doc, time: undefined } : null;
     },
@@ -51,6 +55,17 @@ const pnpmLock = (deps: Record<string, string>) =>
     .join("")}`;
 
 describe("computeOutdated", () => {
+  it("skips the package document when the installed version is already the latest", async () => {
+    const ws = await workspaceWith(
+      { dependencies: { react: "^18.0.0", zod: "^4.6.0" } },
+      pnpmLock({ react: "18.3.1", zod: "4.6.7" }),
+    );
+    const registry = fakeRegistry(docs);
+    const { entries } = await computeOutdated(ws, registry, { now: NOW });
+    expect(entries.map((e) => e.name)).toEqual(["react"]);
+    expect(registry.abbreviatedCalls).toEqual(["react"]);
+  });
+
   it("uses the installed version from the lockfile, not the range floor", async () => {
     const ws = await workspaceWith(
       { dependencies: { react: "^18.0.0", zod: "^4.6.0" } },

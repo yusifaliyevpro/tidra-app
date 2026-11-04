@@ -15,6 +15,20 @@
       "when": 1793630207222,
       "tag": "0001_drop_auto_push",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793813432156,
+      "tag": "0002_branch_off_by_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793814428613,
+      "tag": "0003_trim_registry_cache",
+      "breakpoints": true
     }
   ]
 }

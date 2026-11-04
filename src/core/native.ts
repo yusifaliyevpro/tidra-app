@@ -48,6 +48,17 @@ export const httpFetch: typeof globalThis.fetch = inTauri
   ? (input, init) => tauriFetch(input, init)
   : (input, init) => globalThis.fetch(input, init);
 
+/** Registry documents are downloaded and trimmed in Rust: whole ones are tens of MB and slow to pass over IPC. */
+const fetchPackument: typeof globalThis.fetch = async (input, init) => {
+  const url = input instanceof Request ? input.url : String(input);
+  const headers = Object.fromEntries(new Headers(init?.headers));
+  const { status, etag, body } = await invoke<{ status: number; etag: string | null; body: string }>("registry_fetch", {
+    url,
+    headers,
+  });
+  return new Response(status === 304 ? null : body, { status, headers: etag ? { etag } : {} });
+};
+
 export function createTauriIo(env: AppEnv): Io {
   return {
     readText: (path) => invoke<string | null>("fs_read_text", { path }),
@@ -62,6 +73,7 @@ export function createTauriIo(env: AppEnv): Io {
       }
     },
     fetch: httpFetch,
+    fetchPackument,
     env: env.vars,
     homeDir: env.homeDir.replaceAll("\\", "/"),
   };
