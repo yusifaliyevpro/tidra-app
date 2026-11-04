@@ -2,12 +2,13 @@ use std::ffi::OsString;
 use std::sync::OnceLock;
 
 /// PATH as a new terminal would see it. The inherited one can be stale (Explorer started before a tool was
-/// installed) or trimmed (launched from MSYS2 bash), which hides tools like `%LOCALAPPDATA%\pnpm\bin`.
+/// installed) or trimmed (launched from MSYS2 bash, or from a Linux/macOS desktop launcher that never ran the
+/// shell's rc files), which hides tools like `%LOCALAPPDATA%\pnpm\bin` or `~/.local/share/pnpm`.
 pub fn path() -> &'static OsString {
     static PATH: OnceLock<OsString> = OnceLock::new();
     PATH.get_or_init(|| {
         let inherited = std::env::var_os("PATH").unwrap_or_default();
-        let mut entries: Vec<String> = registry_entries();
+        let mut entries: Vec<String> = system_entries();
         entries.extend(std::env::split_paths(&inherited).map(|p| p.to_string_lossy().into_owned()));
         let mut seen = std::collections::HashSet::new();
         entries.retain(|entry| !entry.is_empty() && seen.insert(entry.trim_end_matches('\\').to_lowercase()));
@@ -16,7 +17,7 @@ pub fn path() -> &'static OsString {
 }
 
 #[cfg(windows)]
-fn registry_entries() -> Vec<String> {
+fn system_entries() -> Vec<String> {
     use winreg::RegKey;
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
 
@@ -32,9 +33,49 @@ fn registry_entries() -> Vec<String> {
     .collect()
 }
 
+/// The login shell's PATH (nvm, fnm, PNPM_HOME are set up in rc files), then common tool folders as a fallback.
 #[cfg(not(windows))]
-fn registry_entries() -> Vec<String> {
-    Vec::new()
+fn system_entries() -> Vec<String> {
+    let mut entries = shell_path().map(|path| path.split(':').map(String::from).collect()).unwrap_or_default();
+    if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
+        let pnpm = std::env::var_os("PNPM_HOME").map(std::path::PathBuf::from);
+        let folders = [".local/share/pnpm", "Library/pnpm", ".local/bin", ".bun/bin", ".volta/bin", ".cargo/bin"];
+        entries.extend(
+            pnpm.into_iter()
+                .chain(folders.iter().map(|folder| home.join(folder)))
+                .chain(["/opt/homebrew/bin", "/usr/local/bin"].map(std::path::PathBuf::from))
+                .filter(|dir| dir.is_dir())
+                .map(|dir| dir.to_string_lossy().into_owned()),
+        );
+    }
+    entries
+}
+
+/// Runs `$SHELL -ilc` once, with a time limit so an rc file waiting for input can't hang the app.
+#[cfg(not(windows))]
+fn shell_path() -> Option<String> {
+    use std::process::{Command, Stdio};
+    const MARK: &str = "__TIDRA_PATH__";
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+    let child = Command::new(shell)
+        .args(["-ilc", &format!("printf '{MARK}%s{MARK}' \"$PATH\"")])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let pid = child.id();
+    let (send, receive) = std::sync::mpsc::channel();
+    std::thread::spawn(move || send.send(child.wait_with_output()));
+    let Ok(Ok(output)) = receive.recv_timeout(std::time::Duration::from_secs(5)) else {
+        let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
+        return None;
+    };
+    // Markers skip anything the rc files print (banners, `fortune`).
+    let text = String::from_utf8_lossy(&output.stdout);
+    let start = text.find(MARK)? + MARK.len();
+    let end = start + text[start..].find(MARK)?;
+    Some(text[start..end].to_string())
 }
 
 /// Expands `%NAME%` from the current environment; unknown names stay as they are.
