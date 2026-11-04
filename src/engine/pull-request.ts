@@ -1,25 +1,39 @@
 const START = "<!-- tidra:commits -->";
 const END = "<!-- /tidra:commits -->";
 const GENERATED_TITLE = "chore(deps): update dependencies";
+const BUMP = "chore(deps): bump ";
 
-/** One commit names the PR after itself; several get a summary title. */
-export function pullTitle(subjects: string[]): string {
-  const [first] = subjects;
-  return subjects.length === 1 && first ? first : GENERATED_TITLE;
+const subject = (message: string) => message.split(/\r?\n/, 1)[0]?.trim() ?? "";
+
+/** One commit names the PR after itself; several get a summary title. Takes full commit messages. */
+export function pullTitle(messages: string[]): string {
+  const [first] = messages;
+  return messages.length === 1 && first ? subject(first) : GENERATED_TITLE;
 }
 
 /** The new title for an existing PR, or undefined to leave it: titles someone wrote by hand are kept. */
-export function nextPullTitle(current: string, subjects: string[]): string | undefined {
-  const next = pullTitle(subjects);
+export function nextPullTitle(current: string, messages: string[]): string | undefined {
+  const next = pullTitle(messages);
   return current !== next && current.startsWith("chore(deps):") ? next : undefined;
 }
 
+/** A bump commit's packages (`react 19.2.0 → 19.3.1`), from its body list or its one-package subject. */
+function listLines(message: string): string[] {
+  const body = message
+    .split(/\r?\n/)
+    .slice(1)
+    .filter((line) => line.startsWith("- "));
+  const first = subject(message);
+  if (first.startsWith(BUMP) && body.length > 0) return body;
+  return [`- ${first.startsWith(BUMP) ? first.slice(BUMP.length) : first}`];
+}
+
 /**
- * The commit list Tidra owns sits between markers, so pushing more commits rewrites only that part and anything
+ * The list Tidra owns sits between markers, so pushing more commits rewrites only that part and anything
  * written around it stays. A body without markers that is only a list came from an older Tidra and is replaced.
  */
-export function pullBody(subjects: string[], current?: string | null): string {
-  const block = [START, ...subjects.map((s) => `- ${s}`), END].join("\n");
+export function pullBody(messages: string[], current?: string | null): string {
+  const block = [START, ...messages.flatMap(listLines), END].join("\n");
   if (!current?.trim()) return block;
   const start = current.indexOf(START);
   const end = current.indexOf(END);

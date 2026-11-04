@@ -20,10 +20,6 @@
     "global-shortcut:allow-unregister",
     "global-shortcut:allow-unregister-all",
     "global-shortcut:allow-is-registered",
-    {
-      "identifier": "http:default",
-      "allow": [{ "url": "https://**" }]
-    },
     "updater:default",
     {
       "identifier": "opener:allow-open-url",

@@ -95,26 +95,53 @@ export interface RegistryClient {
   abbreviated(name: string): Promise<Packument | null>;
   /** Full metadata, adding publish times and repository links. */
   full(name: string): Promise<Packument | null>;
+  /** Just the dist-tags, a few bytes instead of megabytes; undefined where the registry lacks the endpoint. */
+  distTags(name: string): Promise<Record<string, string> | undefined>;
 }
 
+/** The fields Tidra reads. Popular packages' documents run to tens of MB, mostly tarball and dependency data. */
+function trimPackument(doc: Packument): Packument {
+  const versions: Packument["versions"] = {};
+  for (const [version, meta] of Object.entries(doc.versions)) {
+    const { deprecated, engines, peerDependencies, repository } = meta;
+    versions[version] = { deprecated, engines, peerDependencies, repository };
+  }
+  return { name: doc.name, "dist-tags": doc["dist-tags"], versions, time: doc.time, repository: doc.repository };
+}
+
+const DistTags = z.compile(z.record(z.string(), z.string()));
+
 export function createRegistryClient(options: {
-  io: Pick<Io, "fetch">;
+  io: Pick<Io, "fetch" | "fetchPackument">;
   npm: NpmConfig;
   cache?: HttpCache;
   concurrency?: number;
+  /** How long an answer is shared, so one pass over many projects asks once per package. */
+  reuseMs?: number;
   retry?: FetchRetryOptions;
 }): RegistryClient {
-  const limit = createLimit(options.concurrency ?? 8);
-  const inflight = new Map<string, Promise<Packument | null>>();
+  const limit = createLimit(options.concurrency ?? 16);
+  const reuseMs = options.reuseMs ?? 60_000;
+  const fetcher = options.io.fetchPackument ?? options.io.fetch;
+  const packuments = new Map<string, Promise<Packument | null>>();
+  const tags = new Map<string, Promise<Record<string, string> | undefined>>();
 
   const load = (name: string, full: boolean): Promise<Packument | null> => {
     const key = `${full ? "full" : "abbr"}:${name}`;
-    const existing = inflight.get(key);
-    if (existing) return existing;
-    const promise = limit(() => request(name, full, key));
-    inflight.set(key, promise);
-    return promise;
+    return shared(packuments, key, reuseMs, () => limit(() => request(name, full, key)));
   };
+
+  const distTags = (name: string) =>
+    shared(tags, name, reuseMs, async () => {
+      const url = packumentUrl(options.npm, name).replace(/\/([^/]+)$/, "/-/package/$1/dist-tags");
+      const auth = authHeaderFor(options.npm, url);
+      const response = await limit(() =>
+        fetchWithRetry(fetcher, url, { headers: auth ? { authorization: auth } : {} }, options.retry),
+      ).catch(() => undefined);
+      if (!response?.ok) return undefined;
+      const data: unknown = await response.json().catch(() => undefined);
+      return z.validate(DistTags, data) ? data : undefined;
+    });
 
   const request = async (name: string, full: boolean, key: string): Promise<Packument | null> => {
     const url = packumentUrl(options.npm, name);
@@ -127,23 +154,37 @@ export function createRegistryClient(options: {
     const cached = await options.cache?.get(key);
     if (cached?.etag) headers["if-none-match"] = cached.etag;
 
-    const response = await fetchWithRetry(options.io.fetch, url, { headers }, options.retry);
-    let body: string;
-    if (response.status === 304 && cached) body = cached.body;
-    else if (response.status === 404) return null;
-    else if (!response.ok) throw new RegistryError(`${name}: HTTP ${response.status}`, response.status);
-    else {
-      body = await response.text();
-      const etag = response.headers.get("etag");
-      if (etag) await options.cache?.set(key, { etag, body });
-    }
-    const data: unknown = JSON.parse(body);
-    if (!z.validate(PackumentSchema, data)) throw new RegistryError(`${name}: unexpected registry response`);
+    const response = await fetchWithRetry(fetcher, url, { headers }, options.retry);
+    if (response.status === 304 && cached) return parsePackument(name, cached.body);
+    if (response.status === 404) return null;
+    if (!response.ok) throw new RegistryError(`${name}: HTTP ${response.status}`, response.status);
+    const data = trimPackument(parsePackument(name, await response.text()));
+    const etag = response.headers.get("etag");
+    if (etag) await options.cache?.set(key, { etag, body: JSON.stringify(data) });
     return data;
   };
 
   return {
     abbreviated: (name) => load(name, false),
     full: (name) => load(name, true),
+    distTags,
   };
+}
+
+/**
+ * Concurrent callers share one request, and the answer for a short while after: one pass over many projects asks
+ * once per package. Kept forever, a long-running app would never see new releases.
+ */
+function shared<T>(map: Map<string, Promise<T>>, key: string, reuseMs: number, task: () => Promise<T>): Promise<T> {
+  const existing = map.get(key);
+  if (existing) return existing;
+  const promise = task().finally(() => setTimeout(() => map.delete(key), reuseMs));
+  map.set(key, promise);
+  return promise;
+}
+
+function parsePackument(name: string, body: string): Packument {
+  const data: unknown = JSON.parse(body);
+  if (!z.validate(PackumentSchema, data)) throw new RegistryError(`${name}: unexpected registry response`);
+  return data;
 }

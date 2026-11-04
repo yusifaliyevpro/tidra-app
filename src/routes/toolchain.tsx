@@ -13,7 +13,7 @@ import { refreshGlobals } from "@/services/toolchain";
 import { Badge } from "@/ui/badge";
 import { Button, IconButton } from "@/ui/button";
 import { Dialog } from "@/ui/dialog";
-import { Card, Note, Page, Section } from "@/ui/layout";
+import { Card, Page, Section } from "@/ui/layout";
 import { Mono } from "@/ui/misc";
 import { toast, toastError } from "@/ui/toast";
 
@@ -79,10 +79,8 @@ function Toolchain() {
           <GlobalPackages packages={data?.globals ?? []} runCommand={runCommand} />
         </Section>
 
-        <Section title="winget upgrades">
-          {data && !data.wingetAvailable ? (
-            <Note>winget is only available on Windows.</Note>
-          ) : (
+        {data?.wingetAvailable ? (
+          <Section title="winget upgrades">
             <Card>
               {(data?.winget ?? []).length === 0 ? (
                 <p className="p-4 text-sm text-muted">No upgrades available.</p>
@@ -111,8 +109,8 @@ function Toolchain() {
                 </div>
               ))}
             </Card>
-          )}
-        </Section>
+          </Section>
+        ) : null}
       </div>
     </Page>
   );

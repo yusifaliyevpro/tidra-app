@@ -100,3 +100,63 @@ describe("createRegistryClient", () => {
     );
   });
 });
+
+describe("createRegistryClient caching", () => {
+  it("keeps only the fields Tidra reads, so huge documents stay small in the cache", async () => {
+    const store = new Map<string, CachedResponse>();
+    const cache = {
+      get: async (k: string) => store.get(k),
+      set: async (k: string, v: CachedResponse) => void store.set(k, v),
+    };
+    const doc = {
+      name: "react",
+      readme: "x".repeat(10_000),
+      "dist-tags": { latest: "19.3.1" },
+      versions: {
+        "19.3.1": {
+          version: "19.3.1",
+          peerDependencies: { scheduler: "^1" },
+          dist: { tarball: "https://x", integrity: "sha512" },
+        },
+      },
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(doc, { headers: { etag: '"v1"' } }));
+    await createRegistryClient({ io: { fetch: fetcher }, npm: emptyConfig(), cache }).abbreviated("react");
+    const body = store.get("abbr:react")?.body ?? "";
+    expect(body).not.toContain("tarball");
+    expect(body).not.toContain("readme");
+    expect(JSON.parse(body).versions["19.3.1"].peerDependencies).toEqual({ scheduler: "^1" });
+  });
+
+  it("asks again once an earlier answer expired, so new releases show up", async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => jsonResponse(react));
+    const client = createRegistryClient({ io: { fetch: fetcher }, npm: emptyConfig() });
+    await client.abbreviated("react");
+    await client.abbreviated("react");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await client.abbreviated("react");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("reads dist-tags from their own small endpoint, and gives up quietly where it is missing", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ latest: "19.3.1", canary: "19.4.0-canary.1" }))
+      .mockResolvedValueOnce(new Response("", { status: 404 }));
+    const client = createRegistryClient({ io: { fetch: fetcher }, npm: emptyConfig(), retry: noSleep });
+    expect(await client.distTags("@scope/react")).toEqual({ latest: "19.3.1", canary: "19.4.0-canary.1" });
+    expect(fetcher.mock.calls[0]?.[0]).toBe("https://registry.npmjs.org/-/package/@scope%2freact/dist-tags");
+    expect(await client.distTags("private")).toBeUndefined();
+  });
+
+  it("downloads package documents through the native trimming fetch when there is one", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    const fetchPackument = vi.fn<typeof globalThis.fetch>().mockImplementation(async () => jsonResponse(react));
+    const client = createRegistryClient({ io: { fetch, fetchPackument }, npm: emptyConfig() });
+    expect((await client.abbreviated("react"))?.name).toBe("react");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});

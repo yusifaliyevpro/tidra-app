@@ -146,16 +146,24 @@ export function createGit(io: Io, cwd: string) {
     commit: (message: string) => run(["commit", "-m", message]),
     headSha: () => run(["rev-parse", "HEAD"]),
     push: (branch: string) => run(["push", "--set-upstream", "origin", branch]),
-    fetch: () => run(["fetch", "--all", "--prune"]),
+    /** origin and a fork's upstream only: `--all` fails when any other remote is gone (a contributor's deleted fork). */
+    fetch: async (options?: Omit<RunOptions, "cwd">) => {
+      const remotes = (await run(["remote"])).split(/\r?\n/);
+      const wanted = ["origin", "upstream"].filter((name) => remotes.includes(name));
+      return wanted.length > 0 ? run(["fetch", "--prune", "--quiet", "--multiple", ...wanted], options) : "";
+    },
     pull: () => run(["pull", "--ff-only"]),
     /** origin's default branch as last fetched, e.g. `main`. */
     defaultBranch: async () => {
       const result = await raw(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
       return result.code === 0 ? result.stdout.trim().replace(/^origin\//, "") : undefined;
     },
-    /** Commit subjects on HEAD that `base` does not have, oldest first. */
-    subjectsSince: async (base: string) =>
-      (await run(["log", "--reverse", "--format=%s", `${base}..HEAD`])).split("\n").filter(Boolean),
+    /** Full commit messages on HEAD that `base` does not have, oldest first. */
+    messagesSince: async (base: string) =>
+      (await run(["log", "--reverse", "--format=%B%x1e", `${base}..HEAD`]))
+        .split("\x1e")
+        .map((message) => message.trim())
+        .filter(Boolean),
     pushCurrent: () => run(["push"]),
     restore: (paths: string[]) => run(["checkout", "--", ...paths]),
     stash: () => run(["stash", "push", "--include-untracked", "-m", "tidra: before dependency update"]),

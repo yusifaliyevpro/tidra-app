@@ -64,14 +64,17 @@ export function Checkbox({
   onChange,
   label,
   disabled,
+  id,
 }: {
   checked: boolean | "mixed";
   onChange: (checked: boolean) => void;
   label: string;
   disabled?: boolean;
+  id?: string;
 }) {
   return (
     <input
+      id={id}
       type="checkbox"
       aria-label={label}
       disabled={disabled}

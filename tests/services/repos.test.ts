@@ -12,6 +12,7 @@ const git = (program: string, args: string[]) => {
   if (line.includes("refs/heads")) return ok("main\nfeature/a\n");
   if (line.includes("refs/remotes/origin")) return ok("origin/HEAD\norigin\norigin/main\norigin/feature/b\n");
   if (args[0] === "status") return ok("# branch.oid a\n# branch.head main\n");
+  if (line === "remote") return ok("origin\n");
   return ok();
 };
 
@@ -57,13 +58,19 @@ const status = (branch: string, upstream: string | undefined, ahead: number, beh
       .join("\n"),
   );
 
-async function runSync(statuses: ReturnType<typeof ok>[], upstreamRemote?: string, upstreamBehind = 0) {
+async function runSync(
+  statuses: ReturnType<typeof ok>[],
+  upstreamRemote?: string,
+  upstreamBehind = 0,
+  otherRemotes: string[] = [],
+) {
   let call = 0;
   const io = memoryIo(repoFiles, {
     run: (program, args) => {
       if (program !== "git") return ok();
       const line = args.join(" ");
       if (args[0] === "status") return statuses[Math.min(call++, statuses.length - 1)] ?? ok();
+      if (line === "remote") return ok(["origin", ...(upstreamRemote ? ["upstream"] : []), ...otherRemotes].join("\n"));
       if (line === "remote get-url upstream")
         return upstreamRemote ? ok(`${upstreamRemote}\n`) : { code: 2, stdout: "", stderr: "" };
       if (line === "rev-list --count HEAD..upstream/HEAD") return ok(`${upstreamBehind}\n`);
@@ -87,7 +94,7 @@ describe("fetchProject", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     close();
     const lines = io.runs.map((r) => r.args.join(" "));
-    expect(lines.indexOf("fetch --all --prune --quiet")).toBeGreaterThan(lines.indexOf("switch feature/b"));
+    expect(lines.indexOf("fetch --prune --quiet --multiple origin")).toBeGreaterThan(lines.indexOf("switch feature/b"));
   });
 
   it("skips a checkout fetched in the last few minutes unless forced", async () => {
@@ -105,7 +112,7 @@ describe("syncRepo", () => {
       status("main", "origin/main", 1, 3),
       status("main", "origin/main", 1, 0),
     ]);
-    expect(gitCalls).toEqual(["fetch --all --prune", "pull --ff-only", "push"]);
+    expect(gitCalls).toEqual(["fetch --prune --quiet --multiple origin", "pull --ff-only", "push"]);
     expect(message).toBe("Synced app: pulled 3, pushed 1.");
   });
 
@@ -115,12 +122,21 @@ describe("syncRepo", () => {
       "https://github.com/them/app.git",
       2,
     );
-    expect(gitCalls).toEqual(["fetch --all --prune", "merge --ff-only upstream/main", "push"]);
+    expect(gitCalls).toEqual([
+      "fetch --prune --quiet --multiple origin upstream",
+      "merge --ff-only upstream/main",
+      "push",
+    ]);
   });
 
   it("publishes a branch that has no upstream yet", async () => {
     const { gitCalls } = await runSync([status("feature/x", undefined, 0, 0)]);
-    expect(gitCalls).toEqual(["fetch --all --prune", "push --set-upstream origin feature/x"]);
+    expect(gitCalls).toEqual(["fetch --prune --quiet --multiple origin", "push --set-upstream origin feature/x"]);
+  });
+
+  it("fetches only origin and upstream, so a deleted contributor fork can't fail the sync", async () => {
+    const { gitCalls } = await runSync([status("main", "origin/main", 0, 0)], undefined, 0, ["old-fork"]);
+    expect(gitCalls).toEqual(["fetch --prune --quiet --multiple origin"]);
   });
 
   it("says so when there is nothing to do", async () => {

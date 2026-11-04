@@ -24,15 +24,18 @@ beforeEach(async () => {
 
 afterEach(() => close());
 
-function renderDeps(outdated: OutdatedEntry[]) {
-  return render(
+function tree(outdated: OutdatedEntry[], updatedAt?: string) {
+  const report = { ...projectReport(outdated), ...(updatedAt ? { updatedAt } : {}) };
+  return (
     <QueryClientProvider client={svc.queryClient}>
       <ServicesProvider value={{ svc, processes: createProcessManager(svc) }}>
-        <Dependencies projectId="p1" report={projectReport(outdated)} onStarted={() => undefined} />
+        <Dependencies projectId="p1" report={report} onStarted={() => undefined} />
       </ServicesProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
 }
+
+const renderDeps = (outdated: OutdatedEntry[]) => render(tree(outdated));
 
 const button = (name: string | RegExp) => screen.getByRole("button", { name });
 
@@ -45,7 +48,13 @@ describe("Dependencies", () => {
   it("groups by bump with majors first", () => {
     renderDeps([entry("lodash", "4.17.20", "4.17.21", "patch"), entry("vite", "7.0.0", "8.0.0", "major")]);
     const names = screen.getAllByRole("checkbox").map((box) => box.getAttribute("aria-label"));
-    expect(names).toEqual(["Select all major updates", "Select vite", "Select all patch updates", "Select lodash"]);
+    expect(names).toEqual([
+      "Select all major updates",
+      "Select vite",
+      "Select all patch updates",
+      "Select lodash",
+      "Select all updates",
+    ]);
   });
 
   it("selects a group and updates it with the latest versions", async () => {
@@ -65,6 +74,30 @@ describe("Dependencies", () => {
       { entry: expect.objectContaining({ name: "a" }), version: "1.0.1" },
       { entry: expect.objectContaining({ name: "b" }), version: "2.0.5" },
     ]);
+  });
+
+  it("keeps picks when a background refresh brings a new report, dropping packages that are gone", async () => {
+    const user = userEvent.setup();
+    const a = entry("a", "1.0.0", "1.0.1", "patch");
+    const b = entry("b", "2.0.0", "2.0.5", "patch");
+    const { rerender } = render(tree([a, b]));
+    await user.click(screen.getByRole("checkbox", { name: "Select all patch updates" }));
+
+    rerender(tree([a, b], "2026-10-31T00:05:00.000Z"));
+    expect(screen.getByText(/2 selected/)).toBeTruthy();
+
+    rerender(tree([b], "2026-10-31T00:10:00.000Z"));
+    expect(screen.getByText(/1 selected/)).toBeTruthy();
+    expect(button("Update")).toBeTruthy();
+  });
+
+  it("picks every package from the footer", async () => {
+    const user = userEvent.setup();
+    renderDeps([entry("a", "1.0.0", "2.0.0", "major"), entry("b", "1.0.0", "1.1.0", "minor")]);
+    await user.click(screen.getByRole("checkbox", { name: "Select all updates" }));
+    expect(screen.getByText(/2 selected/)).toBeTruthy();
+    await user.click(screen.getByRole("checkbox", { name: "Select all updates" }));
+    expect(screen.queryByText(/selected/)).toBeNull();
   });
 
   it("moves with j and selects with Space", async () => {

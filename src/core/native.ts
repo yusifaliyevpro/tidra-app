@@ -1,5 +1,4 @@
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
-import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import type { DirEntry, Io, OutputStream, RunOptions, RunResult } from "@/engine/io";
 import type { SqlDriver } from "./db/driver";
 
@@ -43,10 +42,51 @@ export async function spawn(program: string, args: string[], options: RunOptions
   }
 }
 
-/** Network calls go through Rust in the app (no CORS); the browser preview uses window.fetch. */
+interface NativeResponse {
+  status: number;
+  headers: [string, string][];
+  body: string;
+}
+
+const NULL_BODY = new Set([101, 204, 205, 304]);
+
+/**
+ * fetch over one Rust call (`http_fetch`): a pooled client, no CORS, and npm package documents trimmed before they
+ * cross IPC when `packument` is set. Abort only stops waiting; Rust gives up on its own after 60 s.
+ */
+async function nativeFetch(input: RequestInfo | URL, init: RequestInit | undefined, packument: boolean) {
+  const request = new Request(input, init);
+  request.signal.throwIfAborted();
+  const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.text();
+  const call = invoke<NativeResponse>("http_fetch", {
+    request: {
+      method: request.method,
+      url: request.url,
+      headers: Object.fromEntries(request.headers),
+      body,
+      packument,
+    },
+  });
+  const { promise: aborted, reject } = Promise.withResolvers<never>();
+  // An abort after the answer arrived must not surface as an unhandled rejection.
+  aborted.catch(() => undefined);
+  const onAbort = () => reject(request.signal.reason);
+  request.signal.addEventListener("abort", onAbort, { once: true });
+  const response = await Promise.race([call, aborted]).finally(() =>
+    request.signal.removeEventListener("abort", onAbort),
+  );
+  return new Response(NULL_BODY.has(response.status) ? null : response.body, {
+    status: response.status,
+    headers: response.headers,
+  });
+}
+
+/** Network calls go through Rust in the app; the browser preview uses window.fetch. */
 export const httpFetch: typeof globalThis.fetch = inTauri
-  ? (input, init) => tauriFetch(input, init)
+  ? (input, init) => nativeFetch(input, init, false)
   : (input, init) => globalThis.fetch(input, init);
+
+const fetchPackument: typeof globalThis.fetch = (input, init) => nativeFetch(input, init, true);
 
 export function createTauriIo(env: AppEnv): Io {
   return {
@@ -62,6 +102,7 @@ export function createTauriIo(env: AppEnv): Io {
       }
     },
     fetch: httpFetch,
+    fetchPackument,
     env: env.vars,
     homeDir: env.homeDir.replaceAll("\\", "/"),
   };
