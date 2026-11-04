@@ -40,6 +40,8 @@ When a bug only shows in the real app (stale UI, a job that never ends), look at
 
 Clipboard writes fail from `eval` ("Document is not focused") because the window isn't focused; a real click works.
 
+Write a new migration's SQL before the dev app can see the file: `pnpm db:generate --custom` creates an empty file, Vite hot-reloads, and the running app records the empty migration as applied in the user's real database.
+
 ## Architecture
 
 ```
@@ -72,8 +74,9 @@ Rules:
 - **Repo-level views** (git state, CI, Actions workflows, forks) work per repository through `listRepos()` (`src/services/repos.ts`), never per package, so a monorepo shows once.
 - **GitHub budget**: every GET goes through the ETag cache (304s are free). Home shows the budget from GitHub's free `/rate_limit` endpoint (`src/modules/github-limit.tsx`) only when fewer than 1,000 requests are left; it is polled each minute and after every background job. Don't fetch GitHub per package or per project when per repo will do.
 - **Notifications**: only news, never a backlog. Advisories notify when a high or critical one is new since the last scan (the first scan just records a baseline), one entry per project. The desktop only gets grouped messages: "You have new high security advisories" and "You have N new notifications". Only notify about fresh events (last 2 days).
+- **Registry**: npm documents of popular packages run to tens of MB. Rust downloads them compressed and trims them to the fields Tidra reads (`registry_fetch`, mirrored by `trimPackument` for tests and `pnpm web`), and only the trimmed copy is cached. A package whose installed version equals its `latest` dist-tag skips the document entirely. Answers are shared for a minute, so one pass over all projects asks once per package.
 - **Fingerprints** (`src/engine/fingerprint.ts`): `loadWorkspace` hashes every input (manifests, workspace yaml, npm config, lockfile) with SHA-256. Unchanged projects reuse the last registry answers for 2 h, security scans skip OSV for 12 h while the lockfile hash matches, Actions scans skip for 6 h while workflow files match, and parsed lockfiles are cached by hash. "Check again" on a project forces a fresh check.
-- **Background jobs at launch**: each job's last successful run is kept in `kv` (`jobLastRuns`), so a relaunch only runs what is due. At most three jobs run at once, in the priority order in `src/services/jobs.ts`. A full project refresh shares one set of git calls per checkout (`GitInfoCache`), so a monorepo's packages don't each run git.
+- **Background jobs at launch**: each job's last successful run is kept in `kv` (`jobLastRuns`), so a relaunch only runs what is due. At most three jobs run at once, in the priority order in `src/services/jobs.ts`. A full project refresh shares one set of git calls per checkout (`GitInfoCache`), so a monorepo's packages don't each run git; each checkout's git state waits only for its own `git fetch` (origin and upstream only), while registry work runs alongside.
 - **Reads in bulk**: list screens read snapshots with `readSnapshots` (one query), and background writes call `svc.invalidate(...)`, which coalesces query invalidations so a 30-project refresh rerenders once.
 - **Error boundaries**: routes use `RouteError`; panels, chrome and table rows wrap in `ErrorBoundary` (`src/ui/error-boundary.tsx`) so one bad snapshot never blanks a screen. Unhandled promise rejections surface as one toast.
 - **Changelogs** cover only what the user watches (packages in the `watchedPackages` setting, repos in `watched_repos`). Nothing is watched automatically.
@@ -127,9 +130,10 @@ Done:
 - All screens: Overview (dashboard: totals, needs-attention table, recent updates, releases, background checks), Projects (filters, branch switcher, grouped by repo), project page, Changelogs, Security (per package), Actions (collapsible per repo), Git, Pull requests, CI, Bot PRs (read-only list), Deploys, My packages, Toolchain, Scripts and ports, Settings (Windows 11 style panes, shortcut recorder, delete all data), onboarding
 - Dependency search lives in the palette (Ctrl+P by default, set in Settings): type a package to see where it is used and update it everywhere
 - Push and open a PR from Tidra (`BranchActions`); merging stays on GitHub, the app never merges
-- Updates never commit, push or open a PR on their own: they stop after the checks. "Commit & Push" (menu: Commit, Push) commits everything with the latest uncommitted run's message (`commitProject`), and "Run checks" reruns the project's checks in an output dialog (update dialog and project page)
+- Updates run on the current branch unless the project turns on "Update on a new branch" (`tidra/deps-<date>`, then Open PR). They never commit, push or open a PR on their own: they stop after the checks. "Commit & Push" (menu: Commit, Push) commits everything with the latest uncommitted run's message (`commitProject`), and "Run checks" reruns the project's checks in an output dialog (update dialog and project page)
 - Actions updates commit on a `tidra/actions-<date>` branch cut from the default branch (never the current branch); each repo with outdated actions can copy a prompt for a coding agent (`actionsUpdatePrompt`)
-- Sync (`syncRepo`, `SyncButton`): fetch, fast-forward a fork's default branch to `upstream`, pull, push; never merges or rebases on its own
+- PR bodies list each package with its versions (`pullBody`), taken from the commit bodies
+- Sync (`syncRepo`, `SyncButton`): fetch origin and upstream (never `--all`, a contributor's deleted fork would fail it), fast-forward a fork's default branch to `upstream`, pull, push; never merges or rebases on its own
 - Scripts runs any project's scripts; starting one from a project page or Toolchain opens its live output in a dialog there
 - The sidebar resumes each section where it was left (the project tab is in the URL); clicking the current section again goes to its root
 - Native feel pass, flash fixes, copy pass
