@@ -165,7 +165,7 @@ function TabContent({
 }) {
   switch (tab) {
     case "dependencies":
-      return <Dependencies key={report.updatedAt} projectId={project.id} report={report} onStarted={onUpdateStarted} />;
+      return <Dependencies projectId={project.id} report={report} onStarted={onUpdateStarted} />;
     case "git":
       return <GitTab report={report} />;
     case "scripts":

@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { AlertTriangle, ArrowRight, Clock } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useServices } from "@/app/services";
 import { useListKeys } from "@/app/shortcuts";
 import type { OutdatedEntry } from "@/engine/outdated";
@@ -24,9 +24,33 @@ const GROUP_LABEL: Record<Bump, string> = {
   none: "",
 };
 
+const BUMP_COLOR: Record<Bump, string> = {
+  major: "text-bad",
+  minor: "text-warn",
+  patch: "text-ok",
+  prerelease: "text-muted",
+  none: "text-muted",
+};
+
 const keyOf = (entry: OutdatedEntry) => `${entry.name}\u0000${entry.range}\u0000${entry.catalog ?? ""}`;
 
-/** `onStarted` lives with the page: a finished run refreshes the report, which remounts this list. */
+/** Adds all `keys`, or removes them when every one is already picked. */
+function toggled(picked: ReadonlySet<string>, keys: string[]): ReadonlySet<string> {
+  const next = new Set(picked);
+  const all = keys.every((key) => next.has(key));
+  for (const key of keys) {
+    if (all) next.delete(key);
+    else next.add(key);
+  }
+  return next;
+}
+
+const checkState = (count: number, total: number) => (count === 0 ? false : count === total ? true : "mixed");
+
+/**
+ * Picks survive background refreshes of the report; a pick whose package is no longer outdated (it was just
+ * updated) simply stops counting.
+ */
 export function Dependencies({
   projectId,
   report,
@@ -38,27 +62,21 @@ export function Dependencies({
 }) {
   const svc = useServices();
   const entries = ORDER.flatMap((bump) => report.outdated.filter((e) => e.bump === bump));
-  const [selected, setSelected] = useState<string | undefined>(entries[0] ? keyOf(entries[0]) : undefined);
-  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const keys = entries.map(keyOf);
+  const [selected, setSelected] = useState<string | undefined>(keys[0]);
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const [targets, setTargets] = useState<Record<string, string>>({});
+  const chosen = entries.filter((e) => picked.has(keyOf(e)));
+  const toggle = (group: string[]) => setPicked((previous) => toggled(previous, group));
 
-  const toggle = (key: string) => {
-    const next = new Set(picked);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    setPicked(next);
-  };
-
-  useListKeys({ ids: entries.map(keyOf), selected, onSelect: setSelected, onToggle: toggle });
+  useListKeys({ ids: keys, selected, onSelect: setSelected, onToggle: (key) => toggle([key]) });
 
   const update = useMutation({
-    mutationFn: (keys: Set<string>) =>
+    mutationFn: () =>
       startUpdate(
         svc,
         projectId,
-        entries
-          .filter((e) => keys.has(keyOf(e)))
-          .map((entry) => ({ entry, version: targets[keyOf(entry)] ?? entry.latest })),
+        chosen.map((entry) => ({ entry, version: targets[keyOf(entry)] ?? entry.latest })),
       ),
     onSuccess: (id) => {
       onStarted(id);
@@ -78,18 +96,8 @@ export function Dependencies({
     );
   }
 
-  const current = entries.find((e) => keyOf(e) === selected);
-  const setTarget = (key: string, version: string) => setTargets({ ...targets, [key]: version });
-  const pickGroup = (bump: Bump) => {
-    const next = new Set(picked);
-    const keys = entries.filter((e) => e.bump === bump).map(keyOf);
-    const all = keys.every((k) => next.has(k));
-    for (const k of keys) {
-      if (all) next.delete(k);
-      else next.add(k);
-    }
-    setPicked(next);
-  };
+  const current = entries.find((e) => keyOf(e) === selected) ?? entries[0];
+  const currentKey = current ? keyOf(current) : undefined;
 
   return (
     <div className="flex h-full flex-col">
@@ -101,60 +109,28 @@ export function Dependencies({
               {ORDER.map((bump) => {
                 const group = entries.filter((e) => e.bump === bump);
                 if (group.length === 0) return null;
-                const keys = group.map(keyOf);
-                const count = keys.filter((k) => picked.has(k)).length;
+                const groupKeys = group.map(keyOf);
                 return (
                   <div key={bump}>
-                    <div className="sticky top-0 z-10 flex h-8 items-center gap-2.5 border-b border-line bg-bg px-4 text-xs text-faint">
-                      <Checkbox
-                        label={`Select all ${bump} updates`}
-                        checked={count === 0 ? false : count === keys.length ? true : "mixed"}
-                        onChange={() => pickGroup(bump)}
-                      />
-                      {GROUP_LABEL[bump]} · {group.length}
-                    </div>
+                    <GroupHeader
+                      bump={bump}
+                      count={groupKeys.filter((k) => picked.has(k)).length}
+                      total={group.length}
+                      onToggle={() => toggle(groupKeys)}
+                    />
                     {group.map((entry) => {
                       const key = keyOf(entry);
-                      const target = targets[key] ?? entry.latest;
                       return (
-                        <div
+                        <DependencyRow
                           key={key}
-                          data-row-id={key}
-                          className={`flex h-10 items-center gap-2.5 border-b border-line pl-4 hover:bg-hover ${selected === key ? "bg-raised" : ""}`}
-                        >
-                          <Checkbox
-                            label={`Select ${entry.name}`}
-                            checked={picked.has(key)}
-                            onChange={() => toggle(key)}
-                          />
-                          <button
-                            type="button"
-                            aria-current={selected === key || undefined}
-                            onClick={() => setSelected(key)}
-                            className="flex h-full min-w-0 flex-1 items-center gap-2.5 pr-4 text-left"
-                          >
-                            <span className="min-w-0 flex-1 truncate font-medium">{entry.name}</span>
-                            {entry.deprecated ? (
-                              <AlertTriangle
-                                className="size-3.5 text-warn"
-                                aria-label="Installed version is deprecated"
-                              />
-                            ) : null}
-                            {entry.heldBackByAge ? (
-                              <Clock
-                                className="size-3.5 text-faint"
-                                aria-label="Newer versions are younger than minimumReleaseAge"
-                              />
-                            ) : null}
-                            <Mono className="text-muted">{entry.current ?? entry.range}</Mono>
-                            <ArrowRight className="size-3 text-faint" />
-                            <Mono
-                              className={bump === "major" ? "text-bad" : bump === "minor" ? "text-warn" : "text-ok"}
-                            >
-                              {target}
-                            </Mono>
-                          </button>
-                        </div>
+                          rowKey={key}
+                          entry={entry}
+                          target={targets[key] ?? entry.latest}
+                          picked={picked.has(key)}
+                          current={currentKey === key}
+                          onToggle={toggle}
+                          onSelect={setSelected}
+                        />
                       );
                     })}
                   </div>
@@ -163,30 +139,106 @@ export function Dependencies({
             </div>
           }
           detail={
-            current ? (
+            current && currentKey ? (
               <DependencyDetail
                 entry={current}
-                target={targets[keyOf(current)] ?? current.latest}
-                onTarget={(version) => setTarget(keyOf(current), version)}
+                target={targets[currentKey] ?? current.latest}
+                onTarget={(version) => setTargets({ ...targets, [currentKey]: version })}
               />
             ) : null
           }
         />
       </div>
-      <footer className="flex h-12 shrink-0 items-center gap-3 border-t border-line px-5">
-        {picked.size > 0 ? <span className="text-sm text-muted">{picked.size} selected</span> : null}
-        <span className="ml-auto text-sm text-faint">
+      <footer className="flex h-12 shrink-0 items-center gap-3 border-t border-line pr-5">
+        <label className="flex h-full items-center gap-2.5 pr-2 pl-4 text-sm text-muted">
+          <Checkbox
+            label="Select all updates"
+            checked={checkState(chosen.length, entries.length)}
+            onChange={() => toggle(keys)}
+          />
+          {chosen.length > 0 ? `${chosen.length} selected` : `All ${entries.length}`}
+        </label>
+        <span className="ml-auto truncate text-sm text-faint">
           {report.checks.length > 0 ? `Checks: ${report.checks.join(", ")}` : "No checks detected"}
         </span>
         <Button
           variant="primary"
-          disabled={picked.size === 0}
+          disabled={chosen.length === 0}
           loading={update.isPending}
-          onClick={() => update.mutate(new Set(picked))}
+          onClick={() => update.mutate()}
         >
-          {picked.size > 1 ? `Update ${picked.size} packages` : "Update"}
+          {chosen.length > 1 ? `Update ${chosen.length} packages` : "Update"}
         </Button>
       </footer>
+    </div>
+  );
+}
+
+/** A section title that also picks its whole group: the full row is the hit target. */
+function GroupHeader({
+  bump,
+  count,
+  total,
+  onToggle,
+}: {
+  bump: Bump;
+  count: number;
+  total: number;
+  onToggle: () => void;
+}) {
+  return (
+    <label className="sticky top-0 z-10 flex h-9 items-center gap-2.5 border-b border-line bg-surface px-4 text-xs">
+      <Checkbox label={`Select all ${bump} updates`} checked={checkState(count, total)} onChange={onToggle} />
+      <span className={`font-medium ${BUMP_COLOR[bump]}`}>{GROUP_LABEL[bump]}</span>
+      <span className="ml-auto text-faint tabular">{count > 0 ? `${count} of ${total}` : total}</span>
+    </label>
+  );
+}
+
+/** The checkbox sits in a full-height label, so the whole left edge of the row picks it. */
+function DependencyRow({
+  rowKey,
+  entry,
+  target,
+  picked,
+  current,
+  onToggle,
+  onSelect,
+}: {
+  rowKey: string;
+  entry: OutdatedEntry;
+  target: string;
+  picked: boolean;
+  current: boolean;
+  onToggle: (keys: string[]) => void;
+  onSelect: (key: string) => void;
+}) {
+  const id = useId();
+  return (
+    <div
+      data-row-id={rowKey}
+      className={`flex h-10 items-center border-b border-line hover:bg-hover ${current ? "bg-raised" : ""}`}
+    >
+      <label htmlFor={id} className="flex h-full shrink-0 items-center pr-2.5 pl-4">
+        <Checkbox id={id} label={`Select ${entry.name}`} checked={picked} onChange={() => onToggle([rowKey])} />
+      </label>
+      <button
+        type="button"
+        aria-current={current || undefined}
+        onClick={() => onSelect(rowKey)}
+        className="flex h-full min-w-0 flex-1 items-center gap-2.5 pr-4 text-left"
+      >
+        <span className="min-w-0 flex-1 truncate font-medium">{entry.name}</span>
+        {entry.deprecated ? (
+          <AlertTriangle className="size-3.5 text-warn" aria-label="Installed version is deprecated" />
+        ) : null}
+        {entry.heldBackByAge ? (
+          <Clock className="size-3.5 text-faint" aria-label="Newer versions are younger than minimumReleaseAge" />
+        ) : null}
+        <Mono className="text-muted">{entry.current ?? entry.range}</Mono>
+        <ArrowRight className="size-3 text-faint" />
+        <Mono className={BUMP_COLOR[entry.bump]}>{target}</Mono>
+      </button>
     </div>
   );
 }
