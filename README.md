@@ -5,16 +5,16 @@
 <p align="center">Keep every project you maintain up to date, from one desktop app.</p>
 
 <p align="center">
-  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.2/Tidra_0.1.2_x64-setup.exe"><img src="https://img.shields.io/badge/Windows-Download-3a74d8?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" /></a>
-  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.2/Tidra_0.1.2_universal.dmg"><img src="https://img.shields.io/badge/macOS-Download-3a74d8?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
-  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.2/Tidra_0.1.2_amd64.AppImage"><img src="https://img.shields.io/badge/Linux-Download-3a74d8?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux (AppImage)" /></a>
+  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.3/Tidra_0.1.3_x64-setup.exe"><img src="https://img.shields.io/badge/Windows-Download-3a74d8?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" /></a>
+  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.3/Tidra_0.1.3_universal.dmg"><img src="https://img.shields.io/badge/macOS-Download-3a74d8?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
+  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.3/Tidra_0.1.3_amd64.AppImage"><img src="https://img.shields.io/badge/Linux-Download-3a74d8?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux (AppImage)" /></a>
 </p>
 
 <p align="center">
   <sub>
     Windows x64 · macOS (Apple silicon and Intel) · Linux x64:
-    <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.2/Tidra_0.1.2_amd64.deb">.deb</a>,
-    <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.2/Tidra-0.1.2-1.x86_64.rpm">.rpm</a>,
+    <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.3/Tidra_0.1.3_amd64.deb">.deb</a>,
+    <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.3/Tidra-0.1.3-1.x86_64.rpm">.rpm</a>,
     <a href="https://github.com/yusifaliyevpro/tidra-app/releases/latest">all releases</a>
   </sub>
 </p>
@@ -43,7 +43,7 @@ The installers are not code-signed yet, so the first launch shows a warning:
 
 ## Features
 
-- **Projects**: add folders, see branch, local changes and outdated packages grouped by major / minor / patch. Pick updates, Tidra installs on a new branch, runs your `check` script (or typecheck / lint / test), and leaves the commit to you.
+- **Projects**: add folders, see branch, local changes and outdated packages grouped by major / minor / patch. Pick updates, Tidra installs them on your branch (or a new one, per project), runs your `check` script (or typecheck / lint / test), and leaves the commit to you.
 - **Changelogs**: release notes between the version you have installed and the latest, with breaking changes flagged.
 - **Security**: advisories for your installed dependency tree, with a "would fail CI" badge that mirrors `pnpm audit --prod --audit-level high`, and one-click fixes.
 - **GitHub Actions versions**: outdated `uses:` refs in your workflows, updated the same way as packages.
