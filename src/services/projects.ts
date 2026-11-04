@@ -1,7 +1,7 @@
 import { ulid } from "ulid";
 import type { ProjectWithPath } from "@/core/store";
 import { findProjects, findRepoRoot } from "@/engine/discover";
-import { createGit, normalizeRemote, type BranchInfo, type ForkInfo, type GitStatus } from "@/engine/git";
+import { createGit, githubSlug, normalizeRemote, type BranchInfo, type ForkInfo, type GitStatus } from "@/engine/git";
 import { createLimit } from "@/engine/limit";
 import { computeOutdated, DEFAULT_MAJOR_PINS, type OutdatedEntry } from "@/engine/outdated";
 import { basename, join, normalize, relative } from "@/engine/path";
@@ -240,13 +240,59 @@ const lastFetched = new Map<string, number>();
 
 const checkoutRoot = (p: ProjectWithPath) => (p.path && p.subdir ? p.path.slice(0, -(p.subdir.length + 1)) : p.path);
 
-/** One quiet `git fetch` with a time limit; a slow or unreachable remote never blocks anything. */
+/**
+ * One quiet `git fetch` with a time limit; a slow or unreachable remote never blocks anything. Skipped when GitHub's
+ * branch heads already match the local remote refs: a fetch spends ~2 s on the SSH handshake alone.
+ */
 async function fetchCheckout(svc: Services, root: string, signal?: AbortSignal) {
-  const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
-  await createGit(svc.io, root)
-    .fetch({ signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
-    .catch(() => undefined);
+  if (!(await remotesUnchanged(svc, root).catch(() => false))) {
+    const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    await createGit(svc.io, root)
+      .fetch({ signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
+      .catch(() => undefined);
+  }
   lastFetched.set(root, Date.now());
+}
+
+/** Whether `git fetch` would bring nothing: every GitHub remote's branches match their `refs/remotes` copies. */
+export async function remotesUnchanged(svc: Services, root: string): Promise<boolean> {
+  const github = await svc.github();
+  if (!github.hasToken) return false;
+  const git = createGit(svc.io, root);
+  const [urls, refs] = await Promise.all([
+    git.raw(["config", "--get-regexp", String.raw`^remote\.(origin|upstream)\.url$`]),
+    git.raw([
+      "for-each-ref",
+      "--format=%(refname:lstrip=2) %(objectname)",
+      "refs/remotes/origin",
+      "refs/remotes/upstream",
+    ]),
+  ]);
+  const remotes = urls.stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      const [key = "", url = ""] = line.split(" ");
+      return { name: key.split(".")[1] ?? "", slug: githubSlug(url) };
+    });
+  if (remotes.length === 0 || remotes.some((r) => !r.slug)) return false;
+  const local = new Map(
+    refs.stdout
+      .split(/\r?\n/)
+      .map((line) => {
+        const [ref = "", sha = ""] = line.split(" ");
+        return [ref, sha] as const;
+      })
+      .filter(([ref]) => ref && !ref.endsWith("/HEAD")),
+  );
+  for (const { name, slug } of remotes) {
+    const heads = slug ? await github.branchHeads(`${slug.owner}/${slug.repo}`) : undefined;
+    if (!heads) return false;
+    const mine = [...local].filter(([ref]) => ref.startsWith(`${name}/`));
+    if (mine.length !== heads.size) return false;
+    if (!mine.every(([ref, sha]) => heads.get(ref.slice(name.length + 1)) === sha)) return false;
+  }
+  return true;
 }
 
 /**

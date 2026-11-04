@@ -154,6 +154,8 @@ const PULL_FIELDS = `... on PullRequest {
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
 }`;
 
+const MatchingRefs = z.array(z.looseObject({ ref: z.string(), object: z.looseObject({ sha: z.string() }) }));
+
 export interface RateLimit {
   limit: number;
   remaining: number;
@@ -248,6 +250,13 @@ export function createGitHub(options: {
     },
 
     repo: (owner: string, repo: string) => json(`/repos/${owner}/${repo}`, RepoSchema),
+
+    /** Every branch head as `name → sha`; undefined past one page, where the list could be incomplete. */
+    async branchHeads(repo: string): Promise<Map<string, string> | undefined> {
+      const refs = await json(`/repos/${repo}/git/matching-refs/heads?per_page=100`, MatchingRefs);
+      if (refs.length >= 100) return undefined;
+      return new Map(refs.map((r) => [r.ref.replace(/^refs\/heads\//, ""), r.object.sha]));
+    },
 
     /** REST budget straight from GitHub, like `gh api rate_limit`; free, so it never spends what it reports. */
     async rateLimit(): Promise<RateLimit> {
