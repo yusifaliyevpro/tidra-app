@@ -49,10 +49,12 @@ describe("store", () => {
       ["web", "C:/code/web"],
     ]);
 
-    await store.updateProject("p1", { checks: ["pnpm check"], updateOnBranch: false });
+    // Updates go to the current branch unless a project asks for a branch.
+    expect(await store.getProject("p1")).toMatchObject({ updateOnBranch: false });
+    await store.updateProject("p1", { checks: ["pnpm check"], updateOnBranch: true });
     expect(await store.getProject("p1")).toMatchObject({
       checks: ["pnpm check"],
-      updateOnBranch: false,
+      updateOnBranch: true,
       deviceId: "device-a",
     });
 
