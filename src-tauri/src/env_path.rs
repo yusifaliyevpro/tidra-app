@@ -36,7 +36,8 @@ fn system_entries() -> Vec<String> {
 /// The login shell's PATH (nvm, fnm, PNPM_HOME are set up in rc files), then common tool folders as a fallback.
 #[cfg(not(windows))]
 fn system_entries() -> Vec<String> {
-    let mut entries = shell_path().map(|path| path.split(':').map(String::from).collect()).unwrap_or_default();
+    let mut entries: Vec<String> =
+        shell_path().map(|path| path.split(':').map(String::from).collect()).unwrap_or_default();
     if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
         let pnpm = std::env::var_os("PNPM_HOME").map(std::path::PathBuf::from);
         let folders = [".local/share/pnpm", "Library/pnpm", ".local/bin", ".bun/bin", ".volta/bin", ".cargo/bin"];
