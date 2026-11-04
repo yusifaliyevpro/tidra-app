@@ -1,9 +1,9 @@
 mod db;
 mod env_path;
 mod fs;
+mod http;
 mod ports;
 mod proc;
-mod registry;
 mod secrets;
 mod tray;
 
@@ -45,7 +45,6 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![HIDDEN_FLAG])))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -69,7 +68,7 @@ pub fn run() {
             fs::fs_exists,
             fs::app_env,
             ports::ports_list,
-            registry::registry_fetch,
+            http::http_fetch,
             tray::tray_set_attention,
         ])
         .setup(|app| {

@@ -19,7 +19,6 @@ tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
-tauri-plugin-http = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-process = "2"
@@ -33,7 +32,7 @@ keyring = { version = "3", features = ["windows-native", "apple-native", "sync-s
 listeners = "0.6"
 rusqlite = { version = "0.41", features = ["bundled"] }
 which = "8"
-# Same version as tauri-plugin-http's; registry documents come 5-10x smaller compressed.
+# All webview HTTP (src/http.rs); registry documents come 5-10x smaller compressed.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "gzip", "brotli"] }
 
 [profile.dev]

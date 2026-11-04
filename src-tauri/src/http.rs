@@ -1,35 +1,62 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+#[derive(Deserialize)]
+pub struct HttpRequest {
+    method: String,
+    url: String,
+    headers: HashMap<String, String>,
+    body: Option<String>,
+    /// An npm package document: pass on only the fields Tidra reads (`trimPackument` in src/engine/registry.ts).
+    #[serde(default)]
+    packument: bool,
+}
+
 #[derive(Serialize)]
-pub struct RegistryResponse {
+pub struct HttpResponse {
     status: u16,
-    etag: Option<String>,
+    headers: Vec<(String, String)>,
     body: String,
 }
 
+/// One pooled client: connections and TLS sessions are reused, which made GitHub calls about 3x faster than the
+/// HTTP plugin's per-request client.
 fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| reqwest::Client::builder().timeout(Duration::from_secs(60)).build().unwrap_or_default())
+    // GitHub's API rejects requests without a User-Agent.
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder().user_agent("Tidra").timeout(Duration::from_secs(60)).build().unwrap_or_default()
+    })
 }
 
-/// Downloads an npm package document, compressed, and passes only the fields Tidra reads to the webview
-/// (`trimPackument` in src/engine/registry.ts). Whole documents run to tens of MB and took seconds each over IPC.
+/// The webview's network calls, one IPC round trip each. Responses arrive decompressed; npm package documents
+/// (tens of MB for popular packages) are trimmed here, since passing them whole took seconds each.
 #[tauri::command]
-pub async fn registry_fetch(url: String, headers: HashMap<String, String>) -> Result<RegistryResponse, String> {
-    let mut request = client().get(&url);
-    for (name, value) in &headers {
-        request = request.header(name, value);
+pub async fn http_fetch(request: HttpRequest) -> Result<HttpResponse, String> {
+    if !request.url.starts_with("https://") {
+        return Err(format!("Only https URLs are allowed: {}", request.url));
     }
-    let response = request.send().await.map_err(|err| err.to_string())?;
+    let method = reqwest::Method::from_bytes(request.method.as_bytes()).map_err(|err| err.to_string())?;
+    let mut builder = client().request(method, &request.url);
+    for (name, value) in &request.headers {
+        builder = builder.header(name, value);
+    }
+    if let Some(body) = request.body {
+        builder = builder.body(body);
+    }
+    let response = builder.send().await.map_err(|err| err.to_string())?;
     let status = response.status().as_u16();
-    let etag = response.headers().get("etag").and_then(|value| value.to_str().ok()).map(String::from);
+    let headers = response
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| Some((name.to_string(), value.to_str().ok()?.to_string())))
+        .collect();
     let bytes = response.bytes().await.map_err(|err| err.to_string())?;
-    let body = if status == 200 { trim(&bytes) } else { None };
-    Ok(RegistryResponse { status, etag, body: body.unwrap_or_else(|| String::from_utf8_lossy(&bytes).into_owned()) })
+    let trimmed = if request.packument && status == 200 { trim(&bytes) } else { None };
+    Ok(HttpResponse { status, headers, body: trimmed.unwrap_or_else(|| String::from_utf8_lossy(&bytes).into_owned()) })
 }
 
 fn trim(bytes: &[u8]) -> Option<String> {
