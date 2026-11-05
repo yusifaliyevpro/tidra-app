@@ -43,6 +43,8 @@ export function addCommand(
   if (field === "devDependencies") flags.push("--dev");
   if (field === "optionalDependencies") flags.push("--optional");
   if (options.exact) flags.push("--exact");
+  // yarn 1 refuses to add to a workspace root without it.
+  if (options.inWorkspaceRoot && pm.name === "yarn" && !pm.yarnBerry) flags.push("-W");
   return { program: pm.name, args: ["add", ...specs, ...flags] };
 }
 

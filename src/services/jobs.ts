@@ -3,6 +3,7 @@ import { like } from "drizzle-orm";
 import { notifications } from "@/core/db/schema";
 import { setTrayAttention } from "@/core/native";
 import type { Job } from "@/core/scheduler";
+import { runFailed } from "@/integrations/github";
 import { scanAllActions } from "./actions";
 import { buildTimeline } from "./changelogs";
 import type { Services } from "./context";
@@ -110,7 +111,7 @@ async function refreshCiAndNotify(svc: Services) {
   const failed = snapshot.entries.flatMap((entry) => {
     const run = entry.runs.find((r) => r.status === "completed" && r.head_branch === entry.defaultBranch);
     const fresh = run && Date.now() - Date.parse(run.created_at) < RECENT_MS;
-    return fresh && run.conclusion === "failure" ? [{ entry, run }] : [];
+    return fresh && runFailed(run) ? [{ entry, run }] : [];
   });
   await Promise.all(
     failed.map(({ entry, run }) =>

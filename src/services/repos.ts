@@ -56,13 +56,33 @@ export async function runRepoAction(svc: Services, repo: RepoGroup, action: Repo
     done = `Pushed ${repo.label}.`;
   } else {
     const gone = (repo.report?.branches ?? []).filter((b) => b.upstreamGone && b.name !== repo.report?.git?.branch);
-    for (const branch of gone) await git.run(["branch", "-d", branch.name]);
-    done = gone.length === 1 ? `Deleted ${gone[0]?.name}.` : `Deleted ${gone.length} merged branches.`;
+    const deleted: string[] = [];
+    const kept: string[] = [];
+    for (const branch of gone) {
+      // `-d` refuses squash-merged branches; that shouldn't stop the rest from being pruned.
+      await git.run(["branch", "-d", branch.name]).then(
+        () => deleted.push(branch.name),
+        () => kept.push(branch.name),
+      );
+    }
+    done = pruneMessage(deleted, kept);
   }
   const gitCache: GitInfoCache = new Map();
   await Promise.all(repo.projects.map((p) => refreshProject(svc, p.id, { gitCache })));
   await svc.queryClient.invalidateQueries({ queryKey: ["reports"] });
   return done;
+}
+
+function pruneMessage(deleted: string[], kept: string[]) {
+  const parts = [
+    deleted.length === 1
+      ? `Deleted ${deleted[0]}.`
+      : deleted.length > 1
+        ? `Deleted ${deleted.length} merged branches.`
+        : "",
+    kept.length > 0 ? `Kept ${kept.join(", ")}: not fully merged.` : "",
+  ].filter(Boolean);
+  return parts.join(" ") || "No merged branches to delete.";
 }
 
 async function repoOfProject(svc: Services, projectId: string): Promise<RepoGroup & { root: string }> {
@@ -108,7 +128,7 @@ export async function switchBranch(
 }
 
 /**
- * One-click sync of the checkout, like an editor's Sync button: fetch every remote, fast-forward a fork's default
+ * One-click sync of the checkout, like an editor's Sync button: fetch origin and upstream, fast-forward a fork's default
  * branch to `upstream`, pull what origin has, then push what it lacks. Never merges or rebases on its own; a
  * diverged branch stops with git's message. Returns a line for the toast.
  */

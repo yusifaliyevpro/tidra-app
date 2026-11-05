@@ -30,6 +30,8 @@ export interface Io {
   fetchPackument?: typeof globalThis.fetch;
   env: Readonly<Record<string, string | undefined>>;
   homeDir: string;
+  /** `windows`, `macos` or `linux`. */
+  platform: string;
 }
 
 export function runOk(result: RunResult): boolean {

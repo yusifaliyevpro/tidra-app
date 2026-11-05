@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createProcessManager } from "@/services/processes";
 import { memoryIo, ok } from "../support/memory-io";
 import { testServices } from "../support/services";
@@ -89,5 +89,77 @@ describe("next commands", () => {
     expect(io.runs.map((r) => r.args[1])).toEqual(["typecheck", "lint"]);
     expect(processes.snapshot()[0]).toMatchObject({ running: false, exitCode: 2 });
     expect(processes.snapshot()[0]?.output).toContain("$ pnpm run lint");
+  });
+});
+
+describe("process control", () => {
+  it("stops a running process through its abort signal and removes it from the list", async () => {
+    let aborted = false;
+    const io = memoryIo(
+      {},
+      {
+        run: (_program, _args, options) =>
+          new Promise((resolve) => {
+            options?.signal?.addEventListener("abort", () => {
+              aborted = true;
+              resolve({ code: null, stdout: "", stderr: "" });
+            });
+          }),
+      },
+    );
+    const { svc, close } = await testServices(io);
+    const manager = createProcessManager(svc);
+    const id = manager.start({ label: "dev", command: { program: "pnpm", args: ["dev"] } });
+    expect(manager.snapshot()[0]).toMatchObject({ id, running: true });
+    manager.stop(id);
+    await vi.waitFor(() => expect(manager.snapshot()[0]?.running).toBe(false));
+    expect(aborted).toBe(true);
+    manager.remove(id);
+    expect(manager.snapshot()).toEqual([]);
+    close();
+  });
+
+  it("aborts a running process when it is removed", async () => {
+    const signals: AbortSignal[] = [];
+    const io = memoryIo(
+      {},
+      { run: (_p, _a, options) => (options?.signal && signals.push(options.signal), new Promise(() => {})) },
+    );
+    const { svc, close } = await testServices(io);
+    const manager = createProcessManager(svc);
+    manager.remove(manager.start({ label: "watch", command: { program: "pnpm", args: ["test:watch"] } }));
+    close();
+    expect(signals[0]?.aborted).toBe(true);
+  });
+
+  it("keeps only the newest output of a very chatty process", async () => {
+    const io = memoryIo(
+      {},
+      {
+        run: async (_p, _a, options) => {
+          for (let i = 0; i < 50; i++)
+            options?.onOutput?.(`${String(i).padStart(2, "0")}${"x".repeat(9_998)}`, "stdout");
+          return ok();
+        },
+      },
+    );
+    const { svc, close } = await testServices(io);
+    const manager = createProcessManager(svc);
+    manager.start({ label: "build", command: { program: "pnpm", args: ["build"] } });
+    await vi.waitFor(() => expect(manager.snapshot()[0]?.running).toBe(false));
+    const output = manager.snapshot()[0]?.output ?? "";
+    close();
+    expect(output.length).toBe(400_000);
+    expect(output.startsWith("10")).toBe(true);
+  });
+
+  it("lists the newest process first", async () => {
+    const { svc, close } = await testServices(memoryIo({}, { run: () => new Promise(() => {}) }));
+    const manager = createProcessManager(svc);
+    const first = manager.start({ label: "a", command: { program: "a", args: [] } });
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    const second = manager.start({ label: "b", command: { program: "b", args: [] } });
+    close();
+    expect(manager.snapshot().map((p) => p.id)).toEqual([second, first]);
   });
 });

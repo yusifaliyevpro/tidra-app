@@ -168,7 +168,7 @@ function ProjectAdvisories({ row }: { row: ProjectFindings }) {
     },
     onSuccess: async (runId) => {
       if (runId) setRun(runId);
-      else toast("Override added, installed and committed.");
+      else toast("Override added and installed. Commit it from the project page.");
       await queryClient.invalidateQueries({ queryKey: ["security"] });
       svc.invalidate(["home"]);
     },

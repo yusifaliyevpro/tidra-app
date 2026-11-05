@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { actionsUpdatePrompt, applyActionUpdatesToRepo, type ActionItem } from "@/services/actions";
-import { memoryIo, ok } from "../support/memory-io";
+import { actionsUpdatePrompt, applyActionUpdatesToRepo, scanActions, type ActionItem } from "@/services/actions";
+import { jsonResponse, memoryIo, ok } from "../support/memory-io";
 import { testServices } from "../support/services";
 
 const item = (patch: Partial<ActionItem>): ActionItem => ({
@@ -59,7 +59,7 @@ describe("applyActionUpdatesToRepo", () => {
     expect(branch).toMatch(/^tidra\/actions-\d{8}-\d{4}$/);
     expect(message).toBe("ci: bump actions/checkout to v5.0.0");
     const lines = io.runs.map((r) => r.args.join(" "));
-    expect(lines).toContain(`switch -c ${branch} main`);
+    expect(lines).toContain(`switch --no-track -c ${branch} origin/main`);
     expect(lines.some((l) => l.startsWith("commit -m ci: bump actions/checkout"))).toBe(true);
     expect(io.files.get("/code/web/.github/workflows/ci.yml")).toContain("actions/checkout@v5");
   });
@@ -70,5 +70,99 @@ describe("applyActionUpdatesToRepo", () => {
     close();
     expect(branch).toBe("tidra/actions-20261101-1200");
     expect(io.runs.some((r) => r.args[0] === "switch")).toBe(false);
+  });
+});
+
+async function scanSetup(files: Record<string, string>, latest: (repo: string) => Response) {
+  let releaseCalls = 0;
+  const io = memoryIo(files, {
+    fetch: async (input) => {
+      const url = new Request(input).url;
+      if (url.endsWith("/releases/latest")) {
+        releaseCalls++;
+        return latest(url);
+      }
+      return jsonResponse({ sha: "abc" });
+    },
+  });
+  const { svc, close } = await testServices(io);
+  return { svc, close, releaseCalls: () => releaseCalls };
+}
+
+describe("scanActions", () => {
+  const WORKFLOW =
+    "jobs:\n  t:\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4.1.0\n";
+
+  it("reports nothing, and no error, for a repo without workflows", async () => {
+    const { svc, close } = await scanSetup({}, () => jsonResponse({}));
+    const report = await scanActions(svc, { key: "k", root: "/repo" });
+    close();
+    expect(report).toMatchObject({ repoKey: "k", items: [], error: undefined });
+  });
+
+  it("finds outdated actions in every workflow file with their next ref", async () => {
+    const { svc, close } = await scanSetup(
+      { "/repo/.github/workflows/ci.yml": WORKFLOW, "/repo/.github/workflows/notes.md": "uses: a/b@v1" },
+      (url) => jsonResponse({ tag_name: url.includes("setup-node") ? "v4.1.0" : "v5.0.0" }),
+    );
+    const report = await scanActions(svc, { key: "k", root: "/repo" });
+    close();
+    expect(report.items.map((i) => [i.file, i.action, i.current, i.latestTag, i.next])).toEqual([
+      [".github/workflows/ci.yml", "actions/checkout", "4.0.0", "v5.0.0", { ref: "v5" }],
+      [".github/workflows/ci.yml", "actions/setup-node", "4.1.0", "v4.1.0", undefined],
+    ]);
+  });
+
+  it("reuses the last scan while the workflow files are unchanged, unless forced", async () => {
+    const { svc, close, releaseCalls } = await scanSetup({ "/repo/.github/workflows/ci.yml": WORKFLOW }, () =>
+      jsonResponse({ tag_name: "v5.0.0" }),
+    );
+    await scanActions(svc, { key: "k", root: "/repo" });
+    const afterFirst = releaseCalls();
+    await scanActions(svc, { key: "k", root: "/repo" });
+    expect(releaseCalls()).toBe(afterFirst);
+    close();
+  });
+
+  it("returns an empty report for a repo without a folder on this device", async () => {
+    const { svc, close } = await scanSetup({}, () => jsonResponse({}));
+    expect((await scanActions(svc, { key: "k", root: undefined })).items).toEqual([]);
+    close();
+  });
+
+  it("keeps the other actions when one release lookup fails", async () => {
+    const { svc, close } = await scanSetup({ "/repo/.github/workflows/ci.yml": WORKFLOW }, (url) =>
+      url.includes("setup-node")
+        ? new Response("{}", { status: 403, headers: { "x-ratelimit-remaining": "0" } })
+        : jsonResponse({ tag_name: "v5.0.0" }),
+    );
+    const report = await scanActions(svc, { key: "k", root: "/repo" });
+    close();
+    expect(report.error).toBeUndefined();
+    expect(report.items.find((i) => i.action === "actions/checkout")?.next).toEqual({ ref: "v5" });
+  });
+});
+
+describe("scanActions after a failed lookup", () => {
+  it("scans again next time instead of reusing the incomplete answer", async () => {
+    let calls = 0;
+    const io = memoryIo(
+      { "/repo/.github/workflows/ci.yml": "steps:\n  - uses: a/b@v1\n" },
+      {
+        fetch: async () => {
+          calls++;
+          return calls === 1
+            ? new Response("{}", { status: 404, statusText: "x" })
+            : jsonResponse({ message: "boom" }, { status: 500 });
+        },
+      },
+    );
+    const { svc, close } = await testServices(io);
+    const first = await scanActions(svc, { key: "k", root: "/repo" });
+    expect(first.items.map((i) => i.action)).toEqual(["a/b"]);
+    const second = await scanActions(svc, { key: "k", root: "/repo" });
+    close();
+    expect(second.error).toBeUndefined();
+    expect(second.items).toHaveLength(1);
   });
 });

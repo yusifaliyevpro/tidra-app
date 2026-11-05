@@ -1,3 +1,5 @@
+import { createLimit } from "@/engine/limit";
+
 export interface Job {
   id: string;
   title: string;
@@ -123,7 +125,8 @@ export function createScheduler(options: SchedulerOptions = {}) {
       if (job) await execute(job);
     },
     async runAll() {
-      await Promise.all([...jobs.values()].map(execute));
+      const limit = createLimit(maxConcurrent);
+      await Promise.all([...jobs.values()].map((job) => limit(() => execute(job))));
     },
     states: snapshot,
   };

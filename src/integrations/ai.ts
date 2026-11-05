@@ -68,7 +68,7 @@ export function buildUpgradePrompt(
   to: string,
   entries: ChangelogEntry[],
 ): string {
-  const perRelease = Math.max(2_000, Math.floor(60_000 / Math.max(entries.length, 1)));
+  const perRelease = Math.floor(60_000 / Math.max(entries.length, 1));
   const notes = entries
     .map((e) => {
       const body = e.body.length > perRelease ? `${e.body.slice(0, perRelease)}\n[truncated]` : e.body;

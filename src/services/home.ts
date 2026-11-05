@@ -2,6 +2,7 @@ import * as z from "@zod/mini";
 import { desc, eq } from "drizzle-orm";
 import { dismissals, runs } from "@/core/db/schema";
 import { DEFAULT_CI_THRESHOLD, wouldFailCi, type CiThreshold, type Severity } from "@/engine/advisories";
+import { runFailed } from "@/integrations/github";
 import { readAllActions } from "./actions";
 import type { TimelineItem } from "./changelogs";
 import type { Services } from "./context";
@@ -89,12 +90,13 @@ function ciStates(entries: NonNullable<Awaited<ReturnType<typeof readCi>>>["entr
   const repos: HomeSummary["ci"]["repos"] = [];
   const failing: HomeSummary["ci"]["failing"] = [];
   for (const entry of entries) {
-    const latest = entry.runs.find((r) => r.head_branch === entry.defaultBranch) ?? entry.runs[0];
+    // Only the default branch: a failing pull request must not turn this repo red.
+    const latest = entry.runs.find((r) => r.head_branch === entry.defaultBranch);
     const state: CiState = !latest
       ? "none"
       : latest.status !== "completed"
         ? "pending"
-        : latest.conclusion === "failure"
+        : runFailed(latest)
           ? "failure"
           : "success";
     byRepo.set(entry.repo.toLowerCase(), state);

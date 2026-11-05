@@ -44,6 +44,7 @@ export function parseStatus(output: string): GitStatus {
 export function normalizeRemote(url: string): string | undefined {
   const trimmed = url
     .trim()
+    .replace(/#.*$/, "")
     .replace(/\/$/, "")
     .replace(/\.git$/, "");
   const scp = /^[\w.-]+@([\w.-]+):(.+)$/.exec(trimmed);
@@ -165,8 +166,14 @@ export function createGit(io: Io, cwd: string) {
         .map((message) => message.trim())
         .filter(Boolean),
     pushCurrent: () => run(["push"]),
-    restore: (paths: string[]) => run(["checkout", "--", ...paths]),
-    stash: () => run(["stash", "push", "--include-untracked", "-m", "tidra: before dependency update"]),
+    /** One path at a time: git rejects the whole list when any path is untracked (a gitignored lockfile). */
+    restore: async (paths: string[]) => {
+      for (const path of paths) {
+        const args = ["checkout", "--", path];
+        const result = await raw(args);
+        if (result.code !== 0 && !result.stderr.includes("did not match")) throw new GitError(args, result);
+      }
+    },
   };
 }
 

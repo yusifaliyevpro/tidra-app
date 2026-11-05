@@ -2,6 +2,7 @@ import semver from "semver";
 import { emptyConfig } from "@/engine/npmrc";
 import { fetchWithRetry } from "@/engine/registry";
 import {
+  nodeUpdateTarget,
   parseNodeIndex,
   parsePnpmGlobals,
   parseVersionOutput,
@@ -55,11 +56,11 @@ const isOutdated = (installed?: string, latest?: string) =>
 
 export async function refreshToolchain(svc: Services): Promise<ToolchainSnapshot> {
   const nodeIndexRequest = fetchWithRetry(svc.io.fetch, "https://nodejs.org/dist/index.json", {})
-    .then((r) => r.json())
-    .then(parseNodeIndex)
-    .catch(() => ({ lts: undefined, current: undefined }));
+    .then((r): Promise<unknown> => r.json())
+    .catch(() => undefined);
+  const windows = svc.io.platform === "windows";
 
-  const [nodeIndex, node, pnpm, npm, git, rustc, cargo, pnpmLatest, npmLatestVersion, gitLatest, rustLatest] =
+  const [nodeReleases, node, pnpm, npm, git, rustc, cargo, pnpmLatest, npmLatestVersion, gitLatest, rustLatest] =
     await Promise.all([
       nodeIndexRequest,
       installedVersion(svc, "node"),
@@ -70,13 +71,13 @@ export async function refreshToolchain(svc: Services): Promise<ToolchainSnapshot
       installedVersion(svc, "cargo"),
       npmLatest(svc, "pnpm"),
       npmLatest(svc, "npm"),
-      githubLatestTag(svc, "git-for-windows", "git"),
+      // Elsewhere git comes from the system's packages, so a git-for-windows release says nothing about it.
+      windows ? githubLatestTag(svc, "git-for-windows", "git") : undefined,
       githubLatestTag(svc, "rust-lang", "rust"),
     ]);
 
-  // Stay on the installed line: LTS users compare against LTS, current users against current.
-  const nodeTarget =
-    node && nodeIndex.lts && semver.major(node) === semver.major(nodeIndex.lts) ? nodeIndex.lts : nodeIndex.current;
+  const nodeIndex = parseNodeIndex(nodeReleases);
+  const nodeTarget = nodeUpdateTarget(nodeReleases, node);
   const tools: ToolInfo[] = [
     {
       id: "node",
@@ -123,13 +124,13 @@ export async function refreshToolchain(svc: Services): Promise<ToolchainSnapshot
 
   const [globals, wingetRun] = await Promise.all([
     pnpm ? readGlobals(svc) : [],
-    svc.io.run("winget", ["upgrade", "--include-unknown", "--disable-interactivity"]),
+    windows ? svc.io.run("winget", ["upgrade", "--include-unknown", "--disable-interactivity"]) : undefined,
   ]);
   const snapshot: ToolchainSnapshot = {
     tools,
     globals,
-    winget: wingetRun.code === null ? [] : parseWingetUpgrades(wingetRun.stdout),
-    wingetAvailable: wingetRun.code !== null,
+    winget: wingetRun && wingetRun.code !== null ? parseWingetUpgrades(wingetRun.stdout) : [],
+    wingetAvailable: Boolean(wingetRun && wingetRun.code !== null),
     updatedAt: new Date().toISOString(),
   };
   await writeSnapshot(svc, "toolchain", snapshot);

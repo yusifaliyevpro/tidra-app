@@ -19,7 +19,13 @@ export const ok = (stdout = ""): RunResult => ({ code: 0, stdout, stderr: "" });
 /** In-memory filesystem and process runner for engine tests. Paths are normalized, so tests can use either slash. */
 export function memoryIo(
   files: Record<string, string> = {},
-  options: { run?: RunHandler; fetch?: typeof globalThis.fetch; env?: Record<string, string>; homeDir?: string } = {},
+  options: {
+    run?: RunHandler;
+    fetch?: typeof globalThis.fetch;
+    env?: Record<string, string>;
+    homeDir?: string;
+    platform?: string;
+  } = {},
 ): MemoryIo {
   const map = new Map(Object.entries(files).map(([path, text]) => [normalize(path), text]));
   const runs: RecordedRun[] = [];
@@ -36,6 +42,7 @@ export function memoryIo(
     files: map,
     runs,
     homeDir: options.homeDir ?? "/home/test",
+    platform: options.platform ?? "windows",
     env: options.env ?? {},
     fetch: options.fetch ?? (() => Promise.reject(new Error("network disabled in tests"))),
     readText: async (path) => map.get(normalize(path)) ?? null,

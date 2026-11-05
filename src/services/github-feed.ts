@@ -1,6 +1,7 @@
 import {
   checkState,
   failingSection,
+  runFailed,
   type CheckState,
   type GitHubNotification,
   type PullRequest,
@@ -172,7 +173,7 @@ export async function failedLog(
 ): Promise<{ job: string; log: string } | undefined> {
   const github = await svc.github();
   const jobs = await github.runJobs(repo, runId);
-  const failed = jobs.find((job) => job.conclusion === "failure") ?? jobs[0];
+  const failed = jobs.find(runFailed) ?? jobs[0];
   if (!failed) return undefined;
   return { job: failed.name, log: failingSection(await github.jobLog(repo, failed.id)) };
 }

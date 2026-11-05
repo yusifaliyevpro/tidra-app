@@ -10,10 +10,18 @@ pub fn path() -> &'static OsString {
         let inherited = std::env::var_os("PATH").unwrap_or_default();
         let mut entries: Vec<String> = system_entries();
         entries.extend(std::env::split_paths(&inherited).map(|p| p.to_string_lossy().into_owned()));
-        let mut seen = std::collections::HashSet::new();
-        entries.retain(|entry| !entry.is_empty() && seen.insert(entry.trim_end_matches('\\').to_lowercase()));
-        std::env::join_paths(entries).unwrap_or(inherited)
+        std::env::join_paths(dedupe(entries, cfg!(windows))).unwrap_or(inherited)
     })
+}
+
+/// First occurrence wins; only Windows paths are case-insensitive.
+fn dedupe(mut entries: Vec<String>, ignore_case: bool) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    entries.retain(|entry| {
+        let key = entry.trim_end_matches(['\\', '/']);
+        !entry.is_empty() && seen.insert(if ignore_case { key.to_lowercase() } else { key.to_string() })
+    });
+    entries
 }
 
 #[cfg(windows)]
@@ -72,10 +80,14 @@ fn shell_path() -> Option<String> {
         let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
         return None;
     };
-    // Markers skip anything the rc files print (banners, `fortune`).
-    let text = String::from_utf8_lossy(&output.stdout);
-    let start = text.find(MARK)? + MARK.len();
-    let end = start + text[start..].find(MARK)?;
+    between_marks(&String::from_utf8_lossy(&output.stdout), MARK)
+}
+
+/// Markers skip anything the rc files print (banners, `fortune`).
+#[cfg(any(test, not(windows)))]
+fn between_marks(text: &str, mark: &str) -> Option<String> {
+    let start = text.find(mark)? + mark.len();
+    let end = start + text[start..].find(mark)?;
     Some(text[start..end].to_string())
 }
 
@@ -121,6 +133,29 @@ mod tests {
         assert_eq!(expand("%PATH%"), home);
         assert_eq!(expand(r"%TIDRA_SURELY_UNSET%\bin"), r"%TIDRA_SURELY_UNSET%\bin");
         assert_eq!(expand("plain;100%"), "plain;100%");
+    }
+
+    #[test]
+    fn dedupes_case_insensitively_only_on_windows() {
+        let entries = || {
+            vec![
+                r"C:\Tools".to_string(),
+                r"c:\tools\".to_string(),
+                String::new(),
+                "/opt/Foo".to_string(),
+                "/opt/foo".to_string(),
+            ]
+        };
+        assert_eq!(dedupe(entries(), true), [r"C:\Tools", "/opt/Foo"]);
+        assert_eq!(dedupe(entries(), false), [r"C:\Tools", r"c:\tools\", "/opt/Foo", "/opt/foo"]);
+        assert_eq!(dedupe(vec!["/a/".into(), "/a".into()], false), ["/a/"]);
+    }
+
+    #[test]
+    fn finds_the_path_between_marks_whatever_rc_files_print() {
+        assert_eq!(between_marks("Welcome!\n__M__/usr/bin:/bin__M__bye", "__M__").as_deref(), Some("/usr/bin:/bin"));
+        assert_eq!(between_marks("no marks here", "__M__"), None);
+        assert_eq!(between_marks("__M__only one", "__M__"), None);
     }
 
     #[test]

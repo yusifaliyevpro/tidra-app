@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   chocolateyNodeUpdate,
   encodePowerShell,
+  nodeUpdateTarget,
   parseNodeIndex,
   parsePnpmGlobals,
   parseVersionOutput,
@@ -98,5 +99,64 @@ describe("chocolateyNodeUpdate", () => {
 
   it("encodes UTF-16LE like PowerShell expects", () => {
     expect(encodePowerShell("ab")).toBe(Buffer.from("ab", "utf16le").toString("base64"));
+  });
+});
+
+describe("toolchain edge cases", () => {
+  it("returns nothing for output without a version", () => {
+    expect(parseVersionOutput("command not found")).toBeUndefined();
+    expect(parseVersionOutput("")).toBeUndefined();
+  });
+
+  it("completes two-part versions", () => {
+    expect(parseVersionOutput("rustup 1.28")).toBe("1.28.0");
+  });
+
+  it("skips pnpm's warnings before the JSON and ignores outdated entries that aren't newer", () => {
+    const list = 'WARN something\n[{"dependencies":{"b":{"version":"2.0.0"},"a":{"version":"1.0.0"}}}]';
+    const outdated = 'WARN x\n{"a":{"latest":"1.0.0"},"b":{"latest":"2.1.0"}}';
+    expect(parsePnpmGlobals(list, outdated)).toEqual([
+      { name: "a", version: "1.0.0" },
+      { name: "b", version: "2.0.0", latest: "2.1.0" },
+    ]);
+  });
+
+  it("returns no globals when pnpm prints no JSON list", () => {
+    expect(parsePnpmGlobals("", "")).toEqual([]);
+    expect(parsePnpmGlobals("[]", "")).toEqual([]);
+  });
+
+  it("finds nothing in a Node index that isn't a release list", () => {
+    expect(parseNodeIndex({ not: "a list" })).toEqual({});
+    expect(parseNodeIndex([])).toEqual({ current: undefined, lts: undefined });
+  });
+
+  it("refuses versions that could inject into the PowerShell script", () => {
+    expect(() => chocolateyNodeUpdate('24.0.0" ; Remove-Item C:\\ -Recurse ; "')).toThrow("Not a Node.js version");
+  });
+});
+
+describe("nodeUpdateTarget", () => {
+  const index = [
+    { version: "v25.1.0", lts: false },
+    { version: "v24.5.0", lts: "Krypton" },
+    { version: "v23.11.0", lts: false },
+    { version: "v22.20.0", lts: "Jod" },
+    { version: "v22.19.0", lts: "Jod" },
+  ];
+
+  it.for([
+    ["22.1.0", "22.20.0"],
+    ["24.1.0", "24.5.0"],
+    ["25.0.0", "25.1.0"],
+    ["23.1.0", "25.1.0"],
+    ["18.0.0", "25.1.0"],
+  ])("compares %s with %s", ([installed, target]) => {
+    expect(nodeUpdateTarget(index, installed)).toBe(target);
+  });
+
+  it("uses the current release without an installed Node, and nothing for a bad index", () => {
+    expect(nodeUpdateTarget(index, undefined)).toBe("25.1.0");
+    expect(nodeUpdateTarget({ nope: true }, "24.0.0")).toBeUndefined();
   });
 });

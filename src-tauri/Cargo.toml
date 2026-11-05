@@ -35,6 +35,9 @@ which = "8"
 # All webview HTTP (src/http.rs); registry documents come 5-10x smaller compressed.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "gzip", "brotli"] }
 
+[dev-dependencies]
+tokio = { version = "1", features = ["net"] }
+
 [profile.dev]
 incremental = true
 

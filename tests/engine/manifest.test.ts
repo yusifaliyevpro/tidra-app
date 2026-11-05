@@ -81,3 +81,88 @@ describe("overrides", () => {
     });
   });
 });
+
+describe("editManifest edge cases", () => {
+  it("adds a dependency that is not in the field yet", () => {
+    const next = editManifest('{\n  "dependencies": {\n    "a": "1.0.0"\n  }\n}\n', [
+      { field: "dependencies", name: "b", value: "^2.0.0" },
+    ]);
+    expect(JSON.parse(next)).toEqual({ dependencies: { a: "1.0.0", b: "^2.0.0" } });
+  });
+
+  it("applies several edits across fields in one pass", () => {
+    const text = '{\n  "dependencies": { "a": "1.0.0" },\n  "devDependencies": { "b": "~1.0.0" }\n}\n';
+    const next = editManifest(text, [
+      { field: "dependencies", name: "a", value: "1.1.0" },
+      { field: "devDependencies", name: "b", value: "~1.2.0" },
+    ]);
+    expect(next).toBe('{\n  "dependencies": { "a": "1.1.0" },\n  "devDependencies": { "b": "~1.2.0" }\n}\n');
+  });
+
+  it("edits scoped names", () => {
+    const next = editManifest('{ "dependencies": { "@types/node": "^24.0.0" } }', [
+      { field: "dependencies", name: "@types/node", value: "^24.5.0" },
+    ]);
+    expect(next).toBe('{ "dependencies": { "@types/node": "^24.5.0" } }');
+  });
+
+  it("returns the text unchanged for no edits", () => {
+    const text = '{ "name": "a" }\n';
+    expect(editManifest(text, [])).toBe(text);
+  });
+
+  it("keeps a byte-order mark if the file has one", () => {
+    const next = editManifest('﻿{ "dependencies": { "a": "1.0.0" } }', [
+      { field: "dependencies", name: "a", value: "1.1.0" },
+    ]);
+    expect(next).toBe('﻿{ "dependencies": { "a": "1.1.0" } }');
+  });
+});
+
+describe("overrides edge cases", () => {
+  it("keeps CRLF when adding a YAML override", () => {
+    expect(editYamlOverrides("packages:\r\n  - a\r\n", [{ name: "x", value: "^1.0.0" }])).toBe(
+      "packages:\r\n  - a\r\noverrides:\r\n  x: ^1.0.0\r\n",
+    );
+  });
+
+  it("writes pnpm.overrides for pnpm versions that read them from package.json", () => {
+    expect(
+      JSON.parse(editJsonOverrides('{ "name": "a" }', "pnpm.overrides", [{ name: "x", value: "^1.0.0" }])),
+    ).toEqual({
+      name: "a",
+      pnpm: { overrides: { x: "^1.0.0" } },
+    });
+  });
+});
+
+describe("editCatalogs edge cases", () => {
+  it("keeps quoting, comments, blank lines and unrelated keys", () => {
+    const text =
+      'catalog:\n  "@types/node": "^24.0.0"\n  react: ^19.0.0\n\n# keep\nonlyBuiltDependencies:\n  - esbuild\n';
+    expect(editCatalogs(text, [{ catalog: "default", name: "@types/node", value: "^24.5.0" }])).toBe(
+      text.replace("^24.0.0", "^24.5.0"),
+    );
+  });
+
+  it("edits flow-style catalogs in place", () => {
+    expect(
+      editCatalogs("catalog: { react: ^19.0.0, zod: ^4.0.0 }\n", [
+        { catalog: "default", name: "react", value: "^19.1.0" },
+      ]),
+    ).toBe("catalog: { react: ^19.1.0, zod: ^4.0.0 }\n");
+  });
+
+  it("creates the catalog when the workspace file has none", () => {
+    expect(editCatalogs("packages:\n  - apps/*\n", [{ catalog: "default", name: "zod", value: "^4.0.0" }])).toBe(
+      "packages:\n  - apps/*\ncatalog:\n  zod: ^4.0.0\n",
+    );
+  });
+
+  it("keeps CRLF line endings", () => {
+    const text = "catalog:\r\n  react: ^19.0.0 # pinned\r\n  zod: '^4.0.0'\r\n";
+    expect(editCatalogs(text, [{ catalog: "default", name: "react", value: "^19.1.0" }])).toBe(
+      text.replace("^19.0.0", "^19.1.0"),
+    );
+  });
+});

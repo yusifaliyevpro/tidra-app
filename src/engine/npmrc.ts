@@ -4,7 +4,7 @@ export interface NpmConfig {
   registry: string;
   scopes: Record<string, string>;
   /** Keyed by `//host/path/` exactly as written in .npmrc. */
-  auth: Record<string, { token?: string; basic?: string }>;
+  auth: Record<string, { token?: string; basic?: string; username?: string; password?: string }>;
   values: Record<string, string>;
 }
 
@@ -40,7 +40,7 @@ export function parseNpmrc(
       line
         .slice(eq + 1)
         .trim()
-        .replace(/^"(.*)"$/, "$1"),
+        .replace(/^(["'])(.*)\1$/, "$2"),
       env,
     );
     if (key === "registry") config.registry = withSlash(value);
@@ -52,6 +52,8 @@ export function parseNpmrc(
       const entry = (config.auth[prefix] ??= {});
       if (field === "_authToken") entry.token = value;
       else if (field === "_auth") entry.basic = value;
+      else if (field === "username") entry.username = value;
+      else if (field === "_password") entry.password = value;
     } else config.values[key] = value;
   }
   return config;
@@ -65,13 +67,24 @@ export function registryFor(config: NpmConfig, name: string): string {
   return config.registry;
 }
 
+/** `_password` is base64, as npm writes it; the header wants `user:password` encoded as a whole. */
+function basicFromPassword(username: string | undefined, password: string | undefined): string | undefined {
+  if (!username || !password) return undefined;
+  try {
+    return btoa(`${username}:${atob(password)}`);
+  } catch {
+    return undefined;
+  }
+}
+
 /** Finds the most specific `//host/path/` credential that covers `url`. */
 export function authHeaderFor(config: NpmConfig, url: string): string | undefined {
   const target = url.replace(/^https?:/, "");
   let best: { length: number; header: string } | undefined;
   for (const [prefix, entry] of Object.entries(config.auth)) {
     if (!target.startsWith(withSlash(prefix))) continue;
-    const header = entry.token ? `Bearer ${entry.token}` : entry.basic ? `Basic ${entry.basic}` : undefined;
+    const basic = entry.basic ?? basicFromPassword(entry.username, entry.password);
+    const header = entry.token ? `Bearer ${entry.token}` : basic ? `Basic ${basic}` : undefined;
     if (header && (!best || prefix.length > best.length)) best = { length: prefix.length, header };
   }
   return best?.header;
