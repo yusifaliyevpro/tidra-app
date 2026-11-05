@@ -28,13 +28,15 @@ export function SyncButton({
     onError: toastError,
   });
   if (!git?.branch || !(git.upstream || fork)) return null;
-  const incoming = git.behind + (fork?.behind ?? 0);
+  // Sync only takes upstream's commits on the branch they belong to; elsewhere this count could never clear.
+  const upstream = fork?.ref?.replace(/^upstream\//, "") === git.branch ? (fork?.behind ?? 0) : 0;
+  const incoming = git.behind + upstream;
   const outgoing = git.ahead;
   if (incoming + outgoing === 0) return null;
   const title = [
     incoming > 0 ? `${incoming} to pull` : undefined,
     outgoing > 0 ? `${outgoing} to push` : undefined,
-    fork?.behind ? `${fork.behind} new on ${fork.remote.replace(/^github\.com\//, "")}` : undefined,
+    upstream > 0 && fork ? `${upstream} new on ${fork.remote.replace(/^github\.com\//, "")}` : undefined,
   ]
     .filter(Boolean)
     .join(", ");

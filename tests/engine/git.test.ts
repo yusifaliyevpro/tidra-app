@@ -228,3 +228,20 @@ describe("restore", () => {
     await expect(createGit(io, "/x").restore(["a"])).rejects.toThrow("index.lock exists");
   });
 });
+
+describe("status", () => {
+  it("doesn't take git's index lock", async () => {
+    let env: Record<string, string> | undefined;
+    const io = memoryIo(
+      {},
+      {
+        run: (_program, _args, options) => {
+          env = options?.env;
+          return ok("# branch.head main\n");
+        },
+      },
+    );
+    await createGit(io, "/x").status();
+    expect(env?.GIT_OPTIONAL_LOCKS).toBe("0");
+  });
+});

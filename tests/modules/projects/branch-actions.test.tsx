@@ -105,7 +105,7 @@ describe("SyncButton", () => {
         <SyncButton
           projectId="p1"
           git={git({ ahead: 1, behind: 2 })}
-          fork={{ remote: "github.com/them/app", behind: 3 }}
+          fork={{ remote: "github.com/them/app", behind: 3, ref: "upstream/main" }}
         />,
       ),
     );
@@ -113,10 +113,25 @@ describe("SyncButton", () => {
     expect(button.textContent).toBe("6");
   });
 
+  it("doesn't count upstream's commits on a branch sync won't move", async () => {
+    const { svc } = await setup("# branch.head feature\n");
+    const { container } = render(
+      wrap(
+        svc,
+        <SyncButton
+          projectId="p1"
+          git={git({ branch: "feature", upstream: "origin/feature" })}
+          fork={{ remote: "github.com/them/app", behind: 3, ref: "upstream/main" }}
+        />,
+      ),
+    );
+    expect(container.innerHTML).toBe("");
+  });
+
   it("syncs the checkout when clicked", async () => {
     const { io, svc } = await setup("# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -2\n");
     render(wrap(svc, <SyncButton projectId="p1" git={git({ behind: 2 })} fork={undefined} />));
     await userEvent.click(screen.getByRole("button", { name: /^Sync/ }));
-    await vi.waitFor(() => expect(gitLines(io)).toContain("pull --ff-only"));
+    await vi.waitFor(() => expect(gitLines(io)).toContain("merge --ff-only @{u}"));
   });
 });

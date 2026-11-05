@@ -67,3 +67,14 @@ describe("createServices", () => {
     driver.close();
   });
 });
+
+describe("the GitHub client", () => {
+  it("asks the keychain once, however many clients are made", async () => {
+    const driver = nodeSqliteDriver();
+    const svc = await createServices({ io: memoryIo(), driver, preview: true });
+    const get = vi.spyOn(svc.secrets, "get");
+    for (let i = 0; i < 5; i++) await svc.github();
+    driver.close();
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+});

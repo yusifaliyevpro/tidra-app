@@ -155,9 +155,16 @@ export function createDemoIo(): Io {
       if (program === "git" && args[0] === "status") return ok(DEMO_GIT[cwd] ?? "# branch.head main\n");
       if (program === "git" && args[0] === "remote")
         return DEMO_REMOTES[cwd] ? ok(DEMO_REMOTES[cwd]) : { code: 2, stdout: "", stderr: "" };
+      if (program === "git" && args.includes("--merged")) return ok("main\nold-experiment\n");
+      if (program === "git" && args[0] === "symbolic-ref") return ok("origin/main\n");
+      if (program === "git" && args[0] === "for-each-ref" && args.some((arg) => arg.includes("committerdate"))) {
+        const now = Math.floor(Date.now() / 1000);
+        return ok(`main|${now}|\nold-experiment|1700000000|[gone]\ntry-new-router|${now - 86_400}|\n`);
+      }
       if (program === "git" && args[0] === "for-each-ref")
-        return ok(`main|${Math.floor(Date.now() / 1000)}|\nold-experiment|1700000000|[gone]\n`);
-      if (program === "git" && args[0] === "rev-parse") return ok("0f3a9c1\n");
+        return ok(args.includes("refs/heads") ? "main\ntry-new-router\nold-experiment\n" : "origin/main\n");
+      if (program === "git" && args[0] === "rev-parse")
+        return ok(args[1] === "--abbrev-ref" ? "upstream/main\n" : "0f3a9c1\n");
       if (program === "git") return ok();
       // Simulated install and checks so the update flow can be exercised in the browser.
       const lines = [`$ ${program} ${args.join(" ")}`, "Resolving dependencies…", "Done in 1.2s"];

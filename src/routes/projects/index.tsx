@@ -1,9 +1,9 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import * as z from "@zod/mini";
 import { cn } from "cn";
-import { ArrowDown, ArrowUp, FolderGit2, Plus, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, FolderGit2, Pencil, Plus, Search } from "lucide-react";
 import { Fragment, useState } from "react";
-import { useHome, useReports } from "@/app/queries";
+import { useFreshGit, useHome, useReports } from "@/app/queries";
 import { useListKeys } from "@/app/shortcuts";
 import { repoLabel } from "@/engine/discover";
 import type { GitStatus } from "@/engine/git";
@@ -51,6 +51,7 @@ function Projects() {
   const navigate = useNavigate();
   const search = Route.useSearch();
   const setSearch = Route.useNavigate();
+  useFreshGit();
   const { data: rows, isPending } = useReports();
   const { data: home } = useHome();
   const [adding, setAdding] = useState(false);
@@ -339,8 +340,12 @@ function GitStatusCell({ projectId, git }: { projectId: string; git: GitStatus |
     <span className="flex min-w-0 items-center gap-1.5">
       <BranchMenu projectId={projectId} git={git} />
       {changed > 0 ? (
-        <span className="shrink-0 text-xs text-warn tabular" title={`${changed} uncommitted changes`}>
-          {changed}✎
+        <span
+          className="flex shrink-0 items-center gap-0.5 text-xs text-warn tabular"
+          title={`${changed} uncommitted changes`}
+        >
+          {changed}
+          <Pencil className="size-3" strokeWidth={1.5} />
         </span>
       ) : null}
       {git && git.ahead > 0 ? (

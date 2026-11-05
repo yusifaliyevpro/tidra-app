@@ -8,7 +8,7 @@ import { MenuItem, Popover } from "@/ui/popover";
 import { Spinner } from "@/ui/spinner";
 import { toast, toastError } from "@/ui/toast";
 
-const VALID_BRANCH = /^(?!\/|.*\/\/|.*\.\.|.*@\{)[\w./-]+(?<![./])$/;
+const VALID_BRANCH = /^(?![-/]|.*\/\/|.*\.\.|.*@\{)[\w./-]+(?<![./]|\.lock)$/;
 
 /** The current branch as a button; opens a filterable list to switch to (or create) another branch in place. */
 export function BranchMenu({ projectId, git }: { projectId: string; git: GitStatus | undefined }) {
@@ -53,7 +53,12 @@ function BranchList({
 }) {
   const svc = useServices();
   const [filter, setFilter] = useState("");
-  const branches = useQuery({ queryKey: ["branches", projectId], queryFn: () => listBranches(svc, projectId) });
+  // Branches also come from terminals and other tools, so each open checks again behind the last list.
+  const branches = useQuery({
+    queryKey: ["branches", projectId],
+    queryFn: () => listBranches(svc, projectId),
+    staleTime: 0,
+  });
   const change = useMutation({
     mutationFn: ({ name, create }: { name: string; create: boolean }) => switchBranch(svc, projectId, name, { create }),
     onSuccess: (_, { name, create }) => {
@@ -80,7 +85,7 @@ function BranchList({
           onChange={(e) => setFilter(e.target.value)}
           onKeyDown={(e) => {
             if (e.key !== "Enter") return;
-            const first = shown[0];
+            const first = shown.find((b) => b.name === query) ?? shown[0];
             if (canCreate && !first) pick(query, true);
             else if (first) pick(first.name);
           }}

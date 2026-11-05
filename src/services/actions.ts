@@ -107,8 +107,8 @@ export async function readActions(svc: Services, repoKey: string) {
 }
 
 /** Every repo with its last scan, for the Actions screen. */
-export async function readAllActions(svc: Services) {
-  const repos = await listRepos(svc);
+export async function readAllActions(svc: Services, known?: RepoGroup[]) {
+  const repos = known ?? (await listRepos(svc));
   const reports = await readSnapshots<ActionsReport>(
     svc,
     repos.map((repo) => actionsKey(repo.key)),

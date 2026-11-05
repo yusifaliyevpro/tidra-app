@@ -7,7 +7,7 @@ import { readDeploys } from "@/services/deploys";
 import { readBotPulls, readCi, readInbox } from "@/services/github-feed";
 import { dismissedAdvisories, homeSummary, readCiThreshold } from "@/services/home";
 import { readPackages } from "@/services/packages";
-import { readAllReports, readReport } from "@/services/projects";
+import { fetchAllCheckouts, readAllReports, readReport } from "@/services/projects";
 import { listRepos } from "@/services/repos";
 import { readAllSecurity } from "@/services/security";
 import { readSnapshot } from "@/services/snapshot";
@@ -25,6 +25,21 @@ export function useReports() {
 export function useRepos() {
   const svc = useServices();
   return useQuery({ queryKey: ["reports", "repos"], queryFn: () => listRepos(svc) });
+}
+
+/** Screens with Sync buttons: fetches every repo in the background on open and on focus, so the counts are current. */
+export function useFreshGit() {
+  const svc = useServices();
+  useQuery({
+    queryKey: ["fresh-git"],
+    queryFn: async () => {
+      await fetchAllCheckouts(svc);
+      return true;
+    },
+    enabled: !svc.preview,
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+  });
 }
 
 export function useProject(projectId: string) {

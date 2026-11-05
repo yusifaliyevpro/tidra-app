@@ -52,7 +52,20 @@ export async function createServices(options: { io: Io; driver: SqlDriver; previ
   }
   const clock = createClock(deviceId, Date.now, await latestHlc(driver));
   const store = createStore(createDb(driver), clock);
-  const secrets = preview ? memorySecrets() : keychain;
+  const base = preview ? memorySecrets() : keychain;
+  // Every repo in a refresh makes a GitHub client; the token only changes through these two calls.
+  let githubToken: Promise<string | undefined> | undefined;
+  const secrets: SecretStore = {
+    ...base,
+    set: (key, value) => {
+      githubToken = undefined;
+      return base.set(key, value);
+    },
+    delete: (key) => {
+      githubToken = undefined;
+      return base.delete(key);
+    },
+  };
 
   const queryClient = new QueryClient({
     defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY, refetchOnWindowFocus: false, retry: false } },
@@ -94,11 +107,13 @@ export async function createServices(options: { io: Io; driver: SqlDriver; previ
       return client;
     },
     async github() {
-      return createGitHub({
-        fetch: io.fetch,
-        token: await secrets.get(SECRET_KEYS.github),
-        cache: store.httpCache,
+      githubToken ??= secrets.get(SECRET_KEYS.github);
+      const reading = githubToken;
+      const token = await reading.catch((error: unknown) => {
+        if (githubToken === reading) githubToken = undefined;
+        throw error;
       });
+      return createGitHub({ fetch: io.fetch, token, cache: store.httpCache });
     },
     async setSecret(key, value) {
       if (value) await secrets.set(key, value);

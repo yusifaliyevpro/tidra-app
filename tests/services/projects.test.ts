@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SECRET_KEYS } from "@/core/secrets";
 import {
   addProject,
   checkCommands,
+  fetchAllCheckouts,
   readAllReports,
   refreshAllProjects,
   refreshProject,
@@ -241,5 +242,65 @@ describe("addProject with a byte-order mark", () => {
     const project = await svc.store.getProject(await addProject(svc, "/code/x"));
     close();
     expect(project?.name).toBe("from-manifest");
+  });
+});
+
+describe("lockfile parsing", () => {
+  it("doesn't parse the lockfile of a project whose files haven't changed", async () => {
+    const io = memoryIo({
+      "/web/package.json": JSON.stringify({ name: "web" }),
+      "/web/pnpm-lock.yaml": "lockfileVersion: '9.0'\nimporters:\n  .: {}\n",
+    });
+    const { svc, close } = await testServices(io);
+    await svc.store.addProject({ id: "p1", name: "web", remote: null, path: "/web" });
+    await refreshProject(svc, "p1");
+    // A relaunch: the report is on disk, and the in-memory cache of parsed lockfiles is empty.
+    vi.resetModules();
+    const { LOCKFILE_PARSERS } = await import("@/engine/lockfile");
+    const parse = vi.spyOn(LOCKFILE_PARSERS, "pnpm-lock.yaml");
+    const relaunched = await import("@/services/projects");
+    await relaunched.refreshProject(svc, "p1");
+    close();
+    expect(parse).not.toHaveBeenCalled();
+  });
+});
+
+describe("fetchAllCheckouts", () => {
+  it("fetches each checkout once and updates its Sync count without asking the registry", async () => {
+    let behind = 0;
+    let requests = 0;
+    const io = memoryIo(
+      {
+        "/fresh/apps/a/package.json": JSON.stringify({ name: "a" }),
+        "/fresh/apps/b/package.json": JSON.stringify({ name: "b" }),
+      },
+      {
+        run: (program, args) => {
+          if (program !== "git") return ok();
+          if (args[0] === "fetch") behind = 2;
+          if (args[0] === "status")
+            return ok(`# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -${behind}\n`);
+          if (args.join(" ") === "remote") return ok("origin\n");
+          return ok();
+        },
+        fetch: async () => {
+          requests++;
+          return jsonResponse({});
+        },
+      },
+    );
+    const { svc, close } = await testServices(io);
+    const remote = "github.com/me/fresh-mono";
+    await svc.store.addProject({ id: "a", name: "a", remote, subdir: "apps/a", path: "/fresh/apps/a" });
+    await svc.store.addProject({ id: "b", name: "b", remote, subdir: "apps/b", path: "/fresh/apps/b" });
+    await refreshProject(svc, "a");
+    await refreshProject(svc, "b");
+    await fetchAllCheckouts(svc);
+    await fetchAllCheckouts(svc);
+    const reports = await readAllReports(svc);
+    close();
+    expect(io.runs.filter((run) => run.args[0] === "fetch")).toHaveLength(1);
+    expect(reports.map(({ report }) => report?.git?.behind)).toEqual([2, 2]);
+    expect(requests).toBe(0);
   });
 });

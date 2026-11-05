@@ -12,10 +12,15 @@ export interface AppEnv {
   vars: Record<string, string>;
 }
 
+/** What a streamed process's result keeps: its listener has seen everything, and a dev server can run for days. */
+const STREAMED_TAIL = 1024 * 1024;
+
 /** Streams a child process; resolves when it exits. Aborting kills the whole process tree. */
 export async function spawn(program: string, args: string[], options: RunOptions = {}): Promise<RunResult> {
   let stdout = "";
   let stderr = "";
+  const keep = (text: string) =>
+    options.onOutput && text.length > 2 * STREAMED_TAIL ? text.slice(-STREAMED_TAIL) : text;
   const { promise, resolve } = Promise.withResolvers<number | null>();
   const channel = new Channel<ProcEvent>();
   // Tauri's Channel exposes a single `onmessage` handler, not EventTarget.
@@ -23,8 +28,8 @@ export async function spawn(program: string, args: string[], options: RunOptions
   channel.onmessage = (event) => {
     if (event.kind === "exit") return resolve(event.code);
     const stream: OutputStream = event.kind;
-    if (stream === "stdout") stdout += event.data;
-    else stderr += event.data;
+    if (stream === "stdout") stdout = keep(stdout + event.data);
+    else stderr = keep(stderr + event.data);
     options.onOutput?.(event.data, stream);
   };
   const id = await invoke<number>("proc_spawn", {

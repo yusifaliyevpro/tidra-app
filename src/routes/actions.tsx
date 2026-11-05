@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { cn } from "cn";
 import { ArrowRight, ChevronRight, ClipboardCopy, ExternalLink, Workflow } from "lucide-react";
 import { useState } from "react";
-import { useActions } from "@/app/queries";
+import { useActions, useFreshGit } from "@/app/queries";
 import { useServices } from "@/app/services";
 import { JobRefresh } from "@/modules/common";
 import { BranchActions } from "@/modules/projects/branch-actions";
@@ -26,6 +26,7 @@ const itemKey = (item: ActionItem) => `${item.file}:${item.line}`;
 type Row = NonNullable<ReturnType<typeof useActions>["data"]>[number];
 
 function Actions() {
+  useFreshGit();
   const { data: rows, isPending } = useActions();
   const withItems = (rows ?? [])
     .filter(({ report }) => (report?.items.length ?? 0) > 0 || report?.error)

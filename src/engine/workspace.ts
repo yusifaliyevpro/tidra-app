@@ -86,6 +86,18 @@ export interface Workspace {
 /** Parsing a big lockfile is the slowest part of loading; the same bytes never parse twice. */
 const parsedLockfiles = createHashCache<Lockfile>(48);
 
+/** It also blocks the UI thread, so it waits until someone reads it: an unchanged project reuses its last report. */
+function lazyLockfile(parse: () => Lockfile): Lockfile {
+  let parsed: Lockfile | undefined;
+  const read = () => (parsed ??= parse());
+  return {
+    get packages() {
+      return read().packages;
+    },
+    installed: (importer, name, spec) => read().installed(importer, name, spec),
+  };
+}
+
 const LOCKFILES: [string, PackageManagerName][] = [
   ["bun.lock", "bun"],
   ["bun.lockb", "bun"],
@@ -262,16 +274,20 @@ export async function loadWorkspace(io: Io, rootPath: string): Promise<Workspace
     lockfileText = parser ? await io.readText(pm.lockfile) : null;
     if (parser && lockfileText !== null) {
       lockfileHash = await sha256(lockfileText);
-      const hit = parsedLockfiles.get(`${pm.lockfile}:${lockfileHash}`);
-      if (hit) lockfile = hit;
-      else {
+      const text = lockfileText;
+      const key = `${pm.lockfile}:${lockfileHash}`;
+      lockfile = lazyLockfile(() => {
+        const hit = parsedLockfiles.get(key);
+        if (hit) return hit;
+        let parsed = EMPTY_LOCKFILE;
         try {
-          lockfile = parser(lockfileText);
+          parsed = parser(text);
         } catch {
-          lockfile = EMPTY_LOCKFILE;
+          // An unreadable lockfile just means versions fall back to the manifest's ranges.
         }
-        parsedLockfiles.set(`${pm.lockfile}:${lockfileHash}`, lockfile);
-      }
+        parsedLockfiles.set(key, parsed);
+        return parsed;
+      });
     }
     // A lockfile above the project root (monorepo checkout) keys importers relative to its own folder.
     const lockRoot = dirname(pm.lockfile);
@@ -279,7 +295,9 @@ export async function loadWorkspace(io: Io, rootPath: string): Promise<Workspace
       const offset = relative(lockRoot, root);
       const inner = lockfile;
       lockfile = {
-        packages: inner.packages,
+        get packages() {
+          return inner.packages;
+        },
         installed: (importer, name, spec) =>
           inner.installed(importer === "." ? offset : `${offset}/${importer}`, name, spec),
       };

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tauri::State;
 use tauri::ipc::Channel;
@@ -59,10 +59,18 @@ fn forget(kills: &Mutex<HashMap<u32, oneshot::Sender<()>>>, id: u32) {
 }
 
 /// Resolves a bare program name through PATH (and PATHEXT on Windows) so `.cmd` shims like `pnpm.cmd` run.
+/// The answer is kept while the file exists: searching PATH costs about as much as a quick git command itself.
 pub fn resolve_program(program: &str) -> Result<PathBuf, String> {
+    static RESOLVED: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
+    let resolved = RESOLVED.get_or_init(Mutex::default);
+    if let Some(path) = resolved.lock().map_err(|err| err.to_string())?.get(program).filter(|path| path.is_file()) {
+        return Ok(path.clone());
+    }
     let cwd = std::env::current_dir().map_err(|err| err.to_string())?;
-    which::which_in(program, Some(crate::env_path::path()), cwd)
-        .map_err(|_| format!("`{program}` was not found on PATH"))
+    let path = which::which_in(program, Some(crate::env_path::path()), cwd)
+        .map_err(|_| format!("`{program}` was not found on PATH"))?;
+    resolved.lock().map_err(|err| err.to_string())?.insert(program.to_string(), path.clone());
+    Ok(path)
 }
 
 /// Length of the longest prefix of `buf` that ends on a UTF-8 character boundary.
@@ -322,6 +330,12 @@ mod tests {
     fn resolves_known_program() {
         let program = if cfg!(windows) { "cmd" } else { "sh" };
         assert!(resolve_program(program).is_ok());
+    }
+
+    #[test]
+    fn resolving_again_gives_the_same_program() {
+        let program = if cfg!(windows) { "cmd" } else { "sh" };
+        assert_eq!(resolve_program(program), resolve_program(program));
     }
 
     #[test]

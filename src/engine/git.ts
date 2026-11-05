@@ -105,6 +105,13 @@ export class GitError extends Error {
   }
 }
 
+const FETCH_LIMIT_MS = 2 * 60_000;
+// A pre-push hook can run a whole test suite.
+const PUSH_LIMIT_MS = 10 * 60_000;
+
+/** The fetch running in each checkout: two at once can fail with "cannot lock ref", and the second adds nothing. */
+const runningFetches = new WeakMap<Io, Map<string, Promise<string>>>();
+
 export function createGit(io: Io, cwd: string) {
   const raw = (args: string[], options: Omit<RunOptions, "cwd"> = {}) =>
     io.run("git", args, { ...options, cwd, env: { GIT_TERMINAL_PROMPT: "0", LC_ALL: "C", ...options.env } });
@@ -114,10 +121,38 @@ export function createGit(io: Io, cwd: string) {
     return result.stdout.trim();
   };
 
+  const startFetch = async (options?: Omit<RunOptions, "cwd">) => {
+    const remotes = (await run(["remote"])).split(/\r?\n/);
+    const wanted = ["origin", "upstream"].filter((name) => remotes.includes(name));
+    if (wanted.length === 0) return "";
+    const signal = options?.signal ?? AbortSignal.timeout(FETCH_LIMIT_MS);
+    const jobs = wanted.length > 1 ? [`--jobs=${wanted.length}`] : [];
+    return run(["fetch", "--prune", "--quiet", "--multiple", ...jobs, ...wanted], { ...options, signal }).catch(
+      (error: unknown) => {
+        if (signal.aborted) throw new Error("git fetch didn't finish in time. Check your connection.");
+        throw error;
+      },
+    );
+  };
+
+  /** origin and a fork's upstream only: `--all` fails when any other remote is gone (a contributor's deleted fork). */
+  const fetch = (options?: Omit<RunOptions, "cwd">): Promise<string> => {
+    const running = runningFetches.get(io) ?? new Map<string, Promise<string>>();
+    runningFetches.set(io, running);
+    // Join the fetch already running; if it fails (a background time limit, say), this caller still gets its own try.
+    const current = running.get(cwd);
+    if (current) return current.catch(() => fetch(options));
+    const started = startFetch(options).finally(() => running.delete(cwd));
+    running.set(cwd, started);
+    return started;
+  };
+
   return {
     raw,
     run,
-    status: async () => parseStatus(await run(["status", "--porcelain=v2", "--branch"])),
+    // Status would otherwise refresh the index under index.lock, failing a switch or commit running at that moment.
+    status: async () =>
+      parseStatus(await run(["status", "--porcelain=v2", "--branch"], { env: { GIT_OPTIONAL_LOCKS: "0" } })),
     remoteUrl: async () => {
       const result = await raw(["remote", "get-url", "origin"]);
       return result.code === 0 ? result.stdout.trim() : undefined;
@@ -136,24 +171,53 @@ export function createGit(io: Io, cwd: string) {
       }
       return { remote };
     },
+    // lstrip, not short: `short` turns a branch into `heads/1.0` when a tag has the same name.
     branches: async () =>
       parseBranches(
-        await run(["for-each-ref", "--format=%(refname:short)|%(committerdate:unix)|%(upstream:track)", "refs/heads"]),
+        await run([
+          "for-each-ref",
+          "--format=%(refname:lstrip=2)|%(committerdate:unix)|%(upstream:track)",
+          "refs/heads",
+        ]),
       ),
     switchCreate: (name: string) => run(["switch", "-c", name]),
-    switchTo: (name: string) => run(["switch", name]),
+    // On a fork, `git switch` refuses a branch that origin and upstream both have unless told which one to prefer.
+    switchTo: (name: string) =>
+      run(["switch", name], {
+        env: { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "checkout.defaultRemote", GIT_CONFIG_VALUE_0: "origin" },
+      }),
     deleteBranch: (name: string) => run(["branch", "-D", name]),
+    /** Local branches whose every commit is already in `base`. */
+    mergedInto: async (base: string) =>
+      (await run(["for-each-ref", "--merged", base, "--format=%(refname:lstrip=2)", "refs/heads"]))
+        .split(/\r?\n/)
+        .filter(Boolean),
+    /** A squash merge shares no commits with its branch, so this compares the branch's whole change with `base`. */
+    squashMerged: async (base: string, branch: string) => {
+      const ref = `refs/heads/${branch}`;
+      const mergeBase = await raw(["merge-base", base, ref]);
+      if (mergeBase.code !== 0) return false;
+      const squashed = await raw(["commit-tree", `${ref}^{tree}`, "-p", mergeBase.stdout.trim(), "-m", "squash"], {
+        env: {
+          GIT_AUTHOR_NAME: "Tidra",
+          GIT_AUTHOR_EMAIL: "tidra@localhost",
+          GIT_COMMITTER_NAME: "Tidra",
+          GIT_COMMITTER_EMAIL: "tidra@localhost",
+        },
+      });
+      if (squashed.code !== 0) return false;
+      const cherry = await raw(["cherry", base, squashed.stdout.trim()]);
+      return cherry.code === 0 && cherry.stdout.startsWith("-");
+    },
     add: (paths: string[]) => run(["add", "--", ...paths]),
     commit: (message: string) => run(["commit", "-m", message]),
     headSha: () => run(["rev-parse", "HEAD"]),
-    push: (branch: string) => run(["push", "--set-upstream", "origin", branch]),
-    /** origin and a fork's upstream only: `--all` fails when any other remote is gone (a contributor's deleted fork). */
-    fetch: async (options?: Omit<RunOptions, "cwd">) => {
-      const remotes = (await run(["remote"])).split(/\r?\n/);
-      const wanted = ["origin", "upstream"].filter((name) => remotes.includes(name));
-      return wanted.length > 0 ? run(["fetch", "--prune", "--quiet", "--multiple", ...wanted], options) : "";
-    },
-    pull: () => run(["pull", "--ff-only"]),
+    push: (branch: string) =>
+      run(["push", "--set-upstream", "origin", branch], { signal: AbortSignal.timeout(PUSH_LIMIT_MS) }),
+    fetch,
+    pull: () => run(["pull", "--ff-only"], { signal: AbortSignal.timeout(FETCH_LIMIT_MS) }),
+    /** A pull right after a fetch, without connecting to the remote a second time. */
+    fastForward: () => run(["merge", "--ff-only", "@{u}"]),
     /** origin's default branch as last fetched, e.g. `main`. */
     defaultBranch: async () => {
       const result = await raw(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
@@ -165,7 +229,7 @@ export function createGit(io: Io, cwd: string) {
         .split("\x1e")
         .map((message) => message.trim())
         .filter(Boolean),
-    pushCurrent: () => run(["push"]),
+    pushCurrent: () => run(["push"], { signal: AbortSignal.timeout(PUSH_LIMIT_MS) }),
     /** One path at a time: git rejects the whole list when any path is untracked (a gitignored lockfile). */
     restore: async (paths: string[]) => {
       for (const path of paths) {

@@ -47,12 +47,13 @@ function ProjectPage() {
   const { data: project, isPending } = useProject(projectId);
   const { data: report } = useReport(projectId);
   const svc = useServices();
-  // Opening a project fetches its repo in the background (at most every few minutes) so Sync counts are current.
+  // Opening a project, or coming back to it, fetches its repo in the background so Sync counts are current.
   useQuery({
     queryKey: ["fetch", projectId],
     queryFn: () => fetchProject(svc, projectId),
     enabled: !svc.preview,
-    staleTime: 5 * 60_000,
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
   });
   const search = Route.useSearch();
   const navigate = Route.useNavigate();

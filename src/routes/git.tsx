@@ -1,12 +1,15 @@
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import * as z from "@zod/mini";
 import { ArrowDown, ArrowUp, Download, FolderOpen, GitFork } from "lucide-react";
-import { useRepos } from "@/app/queries";
+import type { MouseEvent } from "react";
+import { useFreshGit, useRepos } from "@/app/queries";
 import { useServices } from "@/app/services";
 import { inTauri } from "@/core/native";
 import type { GitStatus } from "@/engine/git";
 import { createLimit } from "@/engine/limit";
 import { BranchMenu } from "@/modules/projects/branch-menu";
+import { BranchesDialog } from "@/modules/projects/branches-dialog";
 import { runRepoAction, type RepoAction, type RepoGroup } from "@/services/repos";
 import { Button, IconButton } from "@/ui/button";
 import { openExternal, openFolder, openInVsCode } from "@/ui/external";
@@ -14,14 +17,20 @@ import { Empty, Page } from "@/ui/layout";
 import { toast, toastError } from "@/ui/toast";
 import { VsCodeIcon } from "@/ui/vscode-icon";
 
-export const Route = createFileRoute("/git")({ component: GitOverview });
-
-const STALE_DAYS = 90;
+export const Route = createFileRoute("/git")({
+  validateSearch: z.object({ repo: z.optional(z.string()) }),
+  component: GitOverview,
+});
 
 function GitOverview() {
   const svc = useServices();
+  useFreshGit();
   const { data: groups } = useRepos();
   const repos = (groups ?? []).filter((repo) => repo.report?.git);
+  const search = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const openRepo = (key: string | undefined) => void navigate({ search: { repo: key }, replace: true });
+  const opened = repos.find((repo) => repo.key === search.repo);
   const fetchAll = useMutation({
     mutationFn: async () => {
       const limit = createLimit(4);
@@ -51,7 +60,7 @@ function GitOverview() {
               <th className="font-normal">Local changes</th>
               <th className="font-normal">Origin</th>
               <th className="font-normal">Upstream</th>
-              <th className="font-normal">Merged branches</th>
+              <th className="font-normal">Branches</th>
               <th className="pr-5">
                 <span className="sr-only">Actions</span>
               </th>
@@ -59,16 +68,27 @@ function GitOverview() {
           </thead>
           <tbody>
             {repos.map((repo) => (
-              <RepoRow key={repo.key} repo={repo} />
+              <RepoRow key={repo.key} repo={repo} onOpen={() => openRepo(repo.key)} />
             ))}
           </tbody>
         </table>
       )}
+      <BranchesDialog
+        projectId={opened?.projects[0]?.id}
+        label={opened?.label ?? ""}
+        onClose={() => openRepo(undefined)}
+      />
     </Page>
   );
 }
 
-function RepoRow({ repo }: { repo: RepoGroup }) {
+/** Clicks on the row's own controls, and on menus they portal elsewhere, shouldn't also open the branches. */
+function isRowClick(event: MouseEvent<HTMLElement>) {
+  const { target, currentTarget } = event;
+  return target instanceof Element && currentTarget.contains(target) && !target.closest("button, a, input");
+}
+
+function RepoRow({ repo, onOpen }: { repo: RepoGroup; onOpen: () => void }) {
   const svc = useServices();
   const action = useMutation({
     mutationFn: (kind: RepoAction) => runRepoAction(svc, repo, kind),
@@ -79,21 +99,24 @@ function RepoRow({ repo }: { repo: RepoGroup }) {
   const report = repo.report;
   const git = report?.git;
   if (!git) return null;
-  const staleCutoff = Date.parse(report.updatedAt) - STALE_DAYS * 86_400_000;
   const gone = report.branches.filter((b) => b.upstreamGone && b.name !== git.branch);
-  const stale = report.branches.filter((b) => !b.upstreamGone && new Date(b.lastCommit).valueOf() < staleCutoff);
   const fork = report.fork;
   const root = repo.root;
 
   return (
-    <tr className="h-12 border-b border-line hover:bg-hover">
+    <tr
+      className="h-12 border-b border-line hover:bg-hover"
+      onClick={(event) => {
+        if (isRowClick(event)) onOpen();
+      }}
+    >
       <td className="pl-5">
-        <div className="flex flex-col">
+        <button type="button" className="flex flex-col text-left" onClick={onOpen}>
           <span className="font-medium">{repo.label}</span>
           {repo.projects.length > 1 ? (
             <span className="text-xs text-faint">{repo.projects.map((p) => p.subdir || p.name).join(", ")}</span>
           ) : null}
-        </div>
+        </button>
       </td>
       <td>{repo.projects[0] ? <BranchMenu projectId={repo.projects[0].id} git={git} /> : null}</td>
       <td>
@@ -117,20 +140,14 @@ function RepoRow({ repo }: { repo: RepoGroup }) {
         ) : null}
       </td>
       <td>
-        {gone.length > 0 ? (
-          <span className="flex items-center gap-2">
-            <span className="max-w-56 truncate text-muted" title={gone.map((b) => b.name).join(", ")}>
-              {gone.length === 1 ? gone[0]?.name : `${gone.length} branches`}
+        <span className="flex gap-2 text-sm text-muted">
+          <span className="tabular">{report.branches.length}</span>
+          {gone.length > 0 ? (
+            <span className="text-faint" title={gone.map((b) => b.name).join(", ")}>
+              {gone.length} remote deleted
             </span>
-            <Button size="sm" loading={busy("prune")} onClick={() => action.mutate("prune")}>
-              Delete
-            </Button>
-          </span>
-        ) : stale.length > 0 ? (
-          <span className="text-sm text-faint" title={stale.map((b) => b.name).join(", ")}>
-            {stale.length} stale
-          </span>
-        ) : null}
+          ) : null}
+        </span>
       </td>
       <td className="pr-5">
         <span className="flex justify-end gap-0.5">

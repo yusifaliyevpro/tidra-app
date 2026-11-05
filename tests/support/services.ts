@@ -1,3 +1,4 @@
+import type { Io } from "@/engine/io";
 import type { OutdatedEntry } from "@/engine/outdated";
 import { createServices } from "@/services/context";
 import type { ProjectReport } from "@/services/projects";
@@ -5,7 +6,7 @@ import { memoryIo } from "./memory-io";
 import { nodeSqliteDriver } from "./node-sqlite";
 
 /** Real services over in-memory SQLite and a memory Io, with preview-mode secrets. */
-export async function testServices(io = memoryIo()) {
+export async function testServices(io: Io = memoryIo()) {
   const driver = nodeSqliteDriver();
   const svc = await createServices({ io, driver, preview: true });
   return { svc, close: () => driver.close() };
