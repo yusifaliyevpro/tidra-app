@@ -156,9 +156,16 @@ describe("planAddCommands", () => {
 describe("commitMessage", () => {
   it("uses one line for one package and a list for several", () => {
     expect(commitMessage([react])).toBe("chore(deps): bump react 18.3.1 → 19.3.1");
-    expect(commitMessage([react, vite])).toBe(
-      "chore(deps): bump 2 dependencies\n\n- react 18.3.1 → 19.3.1\n- vite 8.3.4 → 8.3.5",
+    expect(commitMessage([vite, react])).toBe(
+      "chore(deps): bump react and vite\n\n- vite 8.3.4 → 8.3.5\n- react 18.3.1 → 19.3.1",
     );
+  });
+
+  it("keeps every package in the body when the subject is cut short", () => {
+    const names = ["package-name-1", "package-name-2", "package-name-3", "package-name-4"];
+    const [first, , ...body] = commitMessage(names.map(tiptap)).split("\n");
+    expect(first).toBe("chore(deps): bump package-name-1, package-name-2 and 2 more");
+    expect(body).toEqual(names.map((name) => `- ${name} 3.32.0 → 3.32.2`));
   });
 });
 

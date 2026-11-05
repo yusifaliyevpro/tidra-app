@@ -140,6 +140,7 @@ Done:
 - Actions updates commit on a `tidra/actions-<date>` branch cut from the default branch (never the current branch); each repo with outdated actions can copy a prompt for a coding agent (`actionsUpdatePrompt`)
 - Security overrides don't commit either: they record a run whose message Commit uses (`fixWithOverride`)
 - PR bodies list each package with its versions (`pullBody`), taken from the commit bodies
+- Commit subjects and PR titles for several packages name them riskiest first and count the rest (`bumpSubject`): `chore(deps): bump next, oxfmt and 9 more`. PR titles someone wrote by hand are kept
 - Sync (`syncRepo`, `SyncButton`): fetch origin and upstream (never `--all`, a contributor's deleted fork would fail it), fast-forward a fork's default branch to `upstream`, take origin's commits with a local `merge --ff-only` (a `git pull` would connect a second time), push, update an open PR's description; never merges or rebases on its own
 - Git page: clicking a repo opens its branches (`BranchesDialog`) with a merged icon (squash merges included), delete per branch and Delete all. Unmerged branches and Delete all confirm first. The current and default branch can't be deleted, and copies on a remote stay
 - Scripts runs any project's scripts; starting one from a project page or Toolchain opens its live output in a dialog there

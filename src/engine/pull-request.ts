@@ -1,3 +1,5 @@
+import { bumpSubject, type PackageBump } from "./bump-subject";
+
 const START = "<!-- tidra:commits -->";
 const END = "<!-- /tidra:commits -->";
 const GENERATED_TITLE = "chore(deps): update dependencies";
@@ -5,10 +7,12 @@ const BUMP = "chore(deps): bump ";
 
 const subject = (message: string) => message.split(/\r?\n/, 1)[0]?.trim() ?? "";
 
-/** One commit names the PR after itself; several get a summary title. Takes full commit messages. */
+/** One commit names the PR after itself; several are summed up by their packages. Takes full commit messages. */
 export function pullTitle(messages: string[]): string {
   const [first] = messages;
-  return messages.length === 1 && first ? subject(first) : GENERATED_TITLE;
+  if (messages.length === 1 && first) return subject(first);
+  const bumps = messages.flatMap(packageBumps);
+  return bumps.length > 0 ? bumpSubject(bumps) : GENERATED_TITLE;
 }
 
 /** The new title for an existing PR, or undefined to leave it: titles someone wrote by hand are kept. */
@@ -26,6 +30,15 @@ function listLines(message: string): string[] {
   const first = subject(message);
   if (first.startsWith(BUMP) && body.length > 0) return body;
   return [`- ${first.startsWith(BUMP) ? first.slice(BUMP.length) : first}`];
+}
+
+/** Only bump commits count, so a hand-written `move foo → bar` subject isn't read as a package. */
+function packageBumps(message: string): PackageBump[] {
+  if (!subject(message).startsWith(BUMP)) return [];
+  return listLines(message).flatMap((line) => {
+    const match = /^- (\S+) (\S.*) → (\S.*)$/.exec(line);
+    return match?.[1] && match[2] && match[3] ? [{ name: match[1], from: match[2], to: match[3] }] : [];
+  });
 }
 
 /**

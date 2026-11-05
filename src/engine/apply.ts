@@ -1,3 +1,4 @@
+import { bumpSubject } from "./bump-subject";
 import { createGit, GitError, isClean } from "./git";
 import type { Io, OutputStream } from "./io";
 import { editCatalogs, editManifest, type CatalogEdit, type ManifestEdit } from "./manifest";
@@ -110,11 +111,11 @@ export function planAddCommands(workspace: Workspace, selections: Selection[]): 
 
 /** `chore(deps): bump react 19.2.0 → 19.3.1` for one package; a summary line plus a list for several. */
 export function commitMessage(selections: Selection[]): string {
-  const line = ({ entry, version }: Selection) => `${entry.name} ${entry.current ?? entry.range} → ${version}`;
+  const from = ({ entry }: Selection) => entry.current ?? entry.range;
+  const line = (s: Selection) => `${s.entry.name} ${from(s)} → ${s.version}`;
   if (selections.length === 1 && selections[0]) return `chore(deps): bump ${line(selections[0])}`;
-  return [`chore(deps): bump ${selections.length} dependencies`, "", ...selections.map((s) => `- ${line(s)}`)].join(
-    "\n",
-  );
+  const bumps = selections.map((s) => ({ name: s.entry.name, from: from(s), to: s.version }));
+  return [bumpSubject(bumps), "", ...selections.map((s) => `- ${line(s)}`)].join("\n");
 }
 
 /** Stops after the checks: committing is always the user's click. */
