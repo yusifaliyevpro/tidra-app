@@ -103,7 +103,7 @@ export function planAddCommands(workspace: Workspace, selections: Selection[]): 
     importer,
     command: addCommand(workspace.pm, specs, field, {
       exact,
-      inWorkspaceRoot: importer === "." && Boolean(workspace.workspaceYaml) && workspace.importers.length > 1,
+      inWorkspaceRoot: importer === "." && workspace.importers.length > 1,
     }),
   }));
 }
@@ -125,8 +125,6 @@ export type StepState = "running" | "done" | "skipped" | "failed";
 export interface UpdateOptions {
   /** Create and switch to this branch first; `undefined` updates the current branch. */
   branch?: string;
-  /** Stash local changes instead of refusing to run on a dirty tree. */
-  stash?: boolean;
   checks: Check[];
   onStep?: (step: UpdateStep, state: StepState, detail?: string) => void;
   onOutput?: (chunk: string, stream: OutputStream) => void;
@@ -194,10 +192,7 @@ export async function runUpdate(
     if (changes.length === 0) throw new Error("Nothing to update: the selected versions are already written.");
     const status = await git.status();
     result.previousBranch = status.branch;
-    if (!isClean(status)) {
-      if (!options.stash) throw new Error("The working tree has uncommitted changes. Commit or stash them first.");
-      await git.stash();
-    }
+    if (!isClean(status)) throw new Error("The working tree has uncommitted changes. Commit or stash them first.");
     done();
 
     if (options.branch) {
@@ -215,12 +210,17 @@ export async function runUpdate(
     } else skip("write");
 
     begin("install");
-    for (const add of adds) await exec(add.command, join(workspace.root, add.importer));
-    if (catalogChanges.length > 0) await exec(installCommand(workspace.pm));
-    for (const dir of new Set([".", ...adds.map((a) => a.importer)])) {
-      for (const name of LOCKFILE_NAMES) {
-        const path = dir === "." ? name : `${dir}/${name}`;
-        if (!result.touched.includes(path) && (await io.exists(join(workspace.root, path)))) result.touched.push(path);
+    try {
+      for (const add of adds) await exec(add.command, join(workspace.root, add.importer));
+      if (catalogChanges.length > 0) await exec(installCommand(workspace.pm));
+    } finally {
+      // Also when an install fails: an earlier one may already have rewritten the lockfile, and Revert must restore it.
+      for (const dir of new Set([".", ...adds.map((a) => a.importer)])) {
+        for (const name of LOCKFILE_NAMES) {
+          const path = dir === "." ? name : `${dir}/${name}`;
+          if (!result.touched.includes(path) && (await io.exists(join(workspace.root, path))))
+            result.touched.push(path);
+        }
       }
     }
     done();

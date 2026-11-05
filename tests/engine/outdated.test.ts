@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeOutdated, peerConflicts, pickLatest } from "@/engine/outdated";
+import { collectCandidates, computeOutdated, peerConflicts, pickLatest } from "@/engine/outdated";
 import type { Packument, RegistryClient } from "@/engine/registry";
 import { loadWorkspace } from "@/engine/workspace";
 import { memoryIo, packument } from "../support/memory-io";
@@ -179,5 +179,124 @@ describe("peerConflicts", () => {
     expect(peerConflicts({ react: "^19.0.0", vite: "^8.0.0" }, (name) => INSTALLED[name])).toEqual([
       { peer: "react", range: "^19.0.0", installed: "18.3.1" },
     ]);
+  });
+});
+
+describe("collectCandidates", () => {
+  it("groups one package used with the same range in several importers", async () => {
+    const io = memoryIo({
+      "/r/package.json": JSON.stringify({ workspaces: ["a", "b"], dependencies: { zod: "^4.0.0" } }),
+      "/r/a/package.json": JSON.stringify({ name: "a", dependencies: { zod: "^4.0.0" } }),
+      "/r/b/package.json": JSON.stringify({ name: "b", devDependencies: { zod: "^3.0.0" } }),
+    });
+    const candidates = collectCandidates(await loadWorkspace(io, "/r"));
+    expect(candidates.map((c) => [c.name, c.range, c.usages.map((u) => `${u.importer}:${u.field}`)])).toEqual([
+      ["zod", "^4.0.0", [".:dependencies", "a:dependencies"]],
+      ["zod", "^3.0.0", ["b:devDependencies"]],
+    ]);
+  });
+
+  it("skips peers, even when also a devDependency, and catalog entries the catalog doesn't define", async () => {
+    const ws = await workspaceWith({
+      peerDependencies: { react: "^19.0.0" },
+      devDependencies: { react: "^19.3.0", ghost: "catalog:" },
+    });
+    expect(collectCandidates(ws).map((c) => [c.name, c.range])).toEqual([["react", "^19.3.0"]]);
+  });
+
+  it("looks aliases up under the real package name", async () => {
+    const ws = await workspaceWith({ dependencies: { "react-18": "npm:react@^18.0.0" } });
+    expect(collectCandidates(ws)).toMatchObject([
+      { name: "react", range: "^18.0.0", usages: [{ spec: "npm:react@^18.0.0" }] },
+    ]);
+  });
+
+  it("leaves peer-only dependencies out of the outdated list", async () => {
+    const ws = await workspaceWith({ name: "lib", peerDependencies: { react: "^18.0.0" } });
+    const { entries } = await computeOutdated(ws, fakeRegistry(docs), { now: NOW });
+    expect(entries).toEqual([]);
+  });
+});
+
+describe("computeOutdated edge cases", () => {
+  it("reports nothing for a project without dependencies", async () => {
+    expect(await computeOutdated(await workspaceWith({ name: "empty" }), fakeRegistry(docs), { now: NOW })).toEqual({
+      entries: [],
+      errors: [],
+    });
+  });
+
+  it("skips packages the registry doesn't know", async () => {
+    const ws = await workspaceWith({ dependencies: { "not-on-npm": "^1.0.0" } });
+    expect((await computeOutdated(ws, fakeRegistry(docs), { now: NOW })).entries).toEqual([]);
+  });
+
+  it("lists up-to-date packages too when asked", async () => {
+    const ws = await workspaceWith({ dependencies: { zod: "^4.6.0" } }, pnpmLock({ zod: "4.6.7" }));
+    const { entries } = await computeOutdated(ws, fakeRegistry(docs), { now: NOW, includeUpToDate: true });
+    expect(entries).toMatchObject([{ name: "zod", current: "4.6.7", latest: "4.6.7", bump: "none" }]);
+  });
+
+  it("reports the newest version the range allows as wanted", async () => {
+    const ws = await workspaceWith({ dependencies: { react: "^18.0.0" } }, pnpmLock({ react: "18.3.1" }));
+    const { entries } = await computeOutdated(ws, fakeRegistry(docs), { now: NOW });
+    expect(entries).toMatchObject([{ name: "react", wanted: "18.3.1", latest: "19.3.1", bump: "major" }]);
+  });
+
+  it("reports the latest version's peers for the conflict check", async () => {
+    const ws = await workspaceWith({ dependencies: { react: "^18.0.0" } }, pnpmLock({ react: "18.3.1" }));
+    const [entry] = (await computeOutdated(ws, fakeRegistry(docs), { now: NOW })).entries;
+    expect(entry?.peerDependencies).toEqual({});
+  });
+
+  it("can pin other packages to their major", async () => {
+    const ws = await workspaceWith({ dependencies: { react: "^18.0.0" } }, pnpmLock({ react: "18.3.1" }));
+    const { entries } = await computeOutdated(ws, fakeRegistry(docs), { now: NOW, majorPins: ["react"] });
+    expect(entries).toEqual([]);
+  });
+});
+
+describe("pickLatest edge cases", () => {
+  const doc = packument(
+    "a",
+    {
+      "1.0.0": { time: daysAgo(30) },
+      "1.1.0": { time: daysAgo(10), deprecated: "broken" },
+      "1.2.0": { time: daysAgo(0.1) },
+      "2.0.0-rc.1": { time: daysAgo(20) },
+    },
+    { latest: "1.2.0", next: "2.0.0-rc.1" },
+  );
+  it("skips deprecated versions when holding back, and never offers a prerelease to a stable user", () => {
+    expect(pickLatest(doc, "1.0.0", { pinMajor: false, minAgeMinutes: 1440, now: NOW })).toEqual({
+      version: "1.0.0",
+      heldBackByAge: true,
+    });
+  });
+
+  it("follows a prerelease user's channel when the dist-tag has another name", () => {
+    expect(pickLatest(doc, "2.0.0-rc.0", { pinMajor: false, minAgeMinutes: 0, now: NOW })).toEqual({
+      version: "2.0.0-rc.1",
+      heldBackByAge: false,
+    });
+  });
+
+  it("moves a prerelease user to a newer stable release", () => {
+    const released = packument("c", { "2.0.0-rc.1": {}, "2.0.0": {} }, { latest: "2.0.0", rc: "2.0.0-rc.1" });
+    expect(pickLatest(released, "2.0.0-rc.0", { pinMajor: false, minAgeMinutes: 0, now: NOW }).version).toBe("2.0.0");
+  });
+
+  it("ignores release age when the registry sent no publish times", () => {
+    expect(
+      pickLatest({ ...doc, time: undefined }, "1.0.0", { pinMajor: false, minAgeMinutes: 1440, now: NOW }),
+    ).toEqual({
+      version: "1.2.0",
+      heldBackByAge: false,
+    });
+  });
+
+  it("falls back to the newest version when there is no latest tag", () => {
+    const untagged = packument("b", { "1.0.0": {}, "3.0.0": {} }, {});
+    expect(pickLatest(untagged, undefined, { pinMajor: false, minAgeMinutes: 0, now: NOW }).version).toBe("3.0.0");
   });
 });

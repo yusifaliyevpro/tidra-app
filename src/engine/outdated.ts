@@ -58,7 +58,8 @@ export function collectCandidates(workspace: Workspace): Candidate[] {
   for (const importer of workspace.importers) {
     for (const field of DEP_FIELDS) {
       for (const [key, raw] of Object.entries(importer.manifest[field] ?? {})) {
-        if (field === "peerDependencies" && importer.manifest.devDependencies?.[key]) continue;
+        // Peer ranges describe consumers and updates never touch them, so they aren't this project's updates.
+        if (field === "peerDependencies") continue;
         let spec = parseSpec(key, raw);
         let catalog: string | undefined;
         if (spec.kind === "catalog") {
@@ -90,6 +91,15 @@ function deprecationOf(packument: Packument, version: string | undefined): strin
   return typeof value === "string" && value ? value : value === true ? "Deprecated" : undefined;
 }
 
+/** A prerelease user's next version: the tag named after their channel, or any tag on it (rc builds under `next`). */
+function channelTarget(tags: Record<string, string>, channel: string): string | undefined {
+  if (tags[channel]) return tags[channel];
+  return sortVersionsDesc(Object.values(tags)).find((version) => prereleaseChannel(version) === channel);
+}
+
+const newerOf = (a: string | undefined, b: string | undefined) =>
+  a && b && semver.valid(a) && semver.valid(b) ? (semver.gt(a, b) ? a : b) : (a ?? b);
+
 /** Picks the newest version this project may install: channel-aware, pinned majors, and old enough. */
 export function pickLatest(
   packument: Packument,
@@ -98,7 +108,8 @@ export function pickLatest(
 ): { version: string | undefined; heldBackByAge: boolean } {
   const tags = packument["dist-tags"];
   const channel = current ? prereleaseChannel(current) : undefined;
-  let target = (channel && tags[channel]) || tags.latest || sortVersionsDesc(Object.keys(packument.versions))[0];
+  const newest = tags.latest || sortVersionsDesc(Object.keys(packument.versions))[0];
+  let target = channel ? newerOf(channelTarget(tags, channel), newest) : newest;
   if (
     target &&
     current &&
