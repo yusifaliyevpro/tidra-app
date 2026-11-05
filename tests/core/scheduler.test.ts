@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createScheduler } from "@/core/scheduler";
+import { createScheduler, type JobState } from "@/core/scheduler";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -145,5 +145,50 @@ describe("scheduler at launch", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(started).toEqual(["a", "b", "c"]);
     scheduler.stop();
+  });
+});
+
+describe("scheduler extras", () => {
+  it("runs every job once for runAll and records failures without throwing", async () => {
+    const ok = vi.fn<() => Promise<void>>().mockResolvedValue();
+    const scheduler = createScheduler({ random: () => 0 });
+    scheduler.register({ id: "a", title: "A", intervalMinutes: 5, run: ok });
+    scheduler.register({ id: "b", title: "B", intervalMinutes: 5, run: () => Promise.reject(new Error("offline")) });
+    await scheduler.runAll();
+    expect(ok).toHaveBeenCalledTimes(1);
+    expect(scheduler.states().find((s) => s.id === "b")).toMatchObject({
+      failures: 1,
+      lastError: "offline",
+      running: false,
+    });
+  });
+
+  it("does nothing for unknown jobs", async () => {
+    await expect(createScheduler().runNow("missing")).resolves.toBeUndefined();
+  });
+
+  it("reports changes to its listener", async () => {
+    const onChange = vi.fn<(states: JobState[]) => void>();
+    const scheduler = createScheduler({ random: () => 0, onChange });
+    scheduler.register({ id: "a", title: "A", intervalMinutes: 5, run: () => Promise.resolve() });
+    await scheduler.runNow("a");
+    expect(onChange.mock.calls.map(([states]) => states[0]?.running)).toEqual([false, true, false]);
+  });
+
+  it("keeps to maxConcurrent for runAll", async () => {
+    const scheduler = createScheduler({ random: () => 0, maxConcurrent: 2 });
+    let active = 0;
+    let peak = 0;
+    const run = async () => {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      active--;
+    };
+    for (const id of ["a", "b", "c", "d"]) scheduler.register({ id, title: id, intervalMinutes: 5, run });
+    const all = scheduler.runAll();
+    await vi.advanceTimersByTimeAsync(50);
+    await all;
+    expect(peak).toBe(2);
   });
 });

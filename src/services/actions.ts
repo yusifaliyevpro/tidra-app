@@ -23,6 +23,8 @@ export interface ActionsReport {
   error?: string;
   /** Hash of every workflow file; unchanged workflows reuse the last answer while release lookups are cached. */
   fingerprint?: string;
+  /** A release lookup failed, so the next scan shouldn't reuse this one. */
+  incomplete?: boolean;
   updatedAt: string;
 }
 
@@ -49,6 +51,7 @@ export async function scanActions(
   const items: ActionItem[] = [];
   let error: string | undefined;
   let hash: string | undefined;
+  let incomplete = false;
   try {
     if (!(await svc.io.exists(dir))) throw new NoWorkflows();
     const files = (await svc.io.readDir(dir)).filter((entry) => !entry.isDir && /\.ya?ml$/.test(entry.name));
@@ -58,6 +61,7 @@ export async function scanActions(
     if (
       previous &&
       !previous.error &&
+      !previous.incomplete &&
       previous.fingerprint === hash &&
       Date.parse(updatedAt) - Date.parse(previous.updatedAt) < RESCAN_MS
     ) {
@@ -68,7 +72,16 @@ export async function scanActions(
     );
     const sources = [...new Set(uses.map((use) => use.repo))];
     const latest = new Map(
-      await Promise.all(sources.map(async (source) => [source, (await latestOf(svc, source)).latest] as const)),
+      await Promise.all(
+        sources.map(async (source) => {
+          // One failed lookup (rate limit, a repo gone) only skips that action.
+          const found = await latestOf(svc, source).catch(() => {
+            incomplete = true;
+            return undefined;
+          });
+          return [source, found?.latest] as const;
+        }),
+      ),
     );
     for (const use of uses) {
       const release = latest.get(use.repo);
@@ -82,7 +95,7 @@ export async function scanActions(
   } catch (caught) {
     if (!(caught instanceof NoWorkflows)) error = caught instanceof Error ? caught.message : String(caught);
   }
-  const report = { repoKey: repo.key, items, error, fingerprint: hash, updatedAt };
+  const report = { repoKey: repo.key, items, error, fingerprint: hash, incomplete, updatedAt };
   await writeSnapshot(svc, actionsKey(repo.key), report);
   return report;
 }
@@ -121,9 +134,11 @@ export async function applyActionUpdatesToRepo(
   let branch = status.branch;
   let created: { name: string; from: string | undefined } | undefined;
   if (!branch?.startsWith(ACTIONS_BRANCH_PREFIX)) {
-    const base = (await git.defaultBranch()) ?? branch;
+    // origin's copy: the local default branch may be behind.
+    const defaultBranch = await git.defaultBranch();
+    const base = defaultBranch ? `origin/${defaultBranch}` : branch;
     const name = branchName(new Date(), ACTIONS_BRANCH_PREFIX);
-    await git.run(["switch", "-c", name, ...(base ? [base] : [])]);
+    await git.run(["switch", "--no-track", "-c", name, ...(base ? [base] : [])]);
     created = { name, from: status.branch };
     branch = name;
   }

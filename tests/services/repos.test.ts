@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { RunResult } from "@/engine/io";
 import { fetchProject } from "@/services/projects";
-import { listBranches, switchBranch, syncRepo } from "@/services/repos";
+import { listBranches, listRepos, runRepoAction, switchBranch, syncRepo } from "@/services/repos";
 import { memoryIo, ok } from "../support/memory-io";
-import { testServices } from "../support/services";
+import { projectReport, testServices } from "../support/services";
 
 const repoFiles = { "/code/app/package.json": JSON.stringify({ name: "app" }) };
 
@@ -142,5 +143,141 @@ describe("syncRepo", () => {
   it("says so when there is nothing to do", async () => {
     const { message } = await runSync([status("main", "origin/main", 0, 0)]);
     expect(message).toBe("app is in sync.");
+  });
+});
+
+describe("listRepos", () => {
+  it("groups a monorepo's packages under the repo and keeps single-package repos by name", async () => {
+    const { svc, close } = await testServices(memoryIo({}));
+    await svc.store.addProject({
+      id: "w",
+      name: "web",
+      remote: "github.com/me/mono",
+      subdir: "apps/web",
+      path: "/mono/apps/web",
+    });
+    await svc.store.addProject({
+      id: "a",
+      name: "api",
+      remote: "github.com/me/mono",
+      subdir: "apps/api",
+      path: "/mono/apps/api",
+    });
+    await svc.store.addProject({ id: "s", name: "solo", remote: "gitlab.com/me/solo", path: "/solo" });
+    await svc.store.addProject({ id: "l", name: "local", remote: null, path: "/local" });
+    const repos = await listRepos(svc);
+    close();
+    expect(repos.map((r) => [r.key, r.label, r.github, r.root, r.projects.map((p) => p.id).toSorted()])).toEqual([
+      ["/local", "local", undefined, "/local", ["l"]],
+      ["github.com/me/mono", "mono", "me/mono", "/mono", ["a", "w"]],
+      ["gitlab.com/me/solo", "solo", undefined, "/solo", ["s"]],
+    ]);
+  });
+});
+
+async function repoFixture(run: (args: string[]) => RunResult = () => ok()) {
+  const io = memoryIo(repoFiles, { run: (program, args) => (program === "git" ? run(args) : ok()) });
+  const { svc, close } = await testServices(io);
+  await svc.store.addProject({ id: "p1", name: "app", remote: "github.com/me/app", path: "/code/app" });
+  const [group] = await listRepos(svc);
+  if (!group) throw new Error("no repo");
+  return { io, svc, close, group };
+}
+
+describe("runRepoAction", () => {
+  it("pulls and pushes the checkout and says so", async () => {
+    const { io, svc, close, group } = await repoFixture();
+    expect(await runRepoAction(svc, group, "pull")).toBe("Pulled app.");
+    expect(await runRepoAction(svc, group, "push")).toBe("Pushed app.");
+    close();
+    expect(io.runs.map((r) => r.args.join(" "))).toEqual(expect.arrayContaining(["pull --ff-only", "push"]));
+  });
+
+  it("refuses a repo without a folder on this device", async () => {
+    const { svc, close, group } = await repoFixture();
+    await expect(runRepoAction(svc, { ...group, root: undefined }, "pull")).rejects.toThrow("no folder on this device");
+    close();
+  });
+
+  it("deletes branches whose upstream is gone, except the current one", async () => {
+    const { io, svc, close, group } = await repoFixture();
+    const report = {
+      ...projectReport([]),
+      git: {
+        branch: "gone-current",
+        upstream: undefined,
+        ahead: 0,
+        behind: 0,
+        changed: 0,
+        untracked: 0,
+        conflicted: 0,
+      },
+      branches: [
+        { name: "gone-a", lastCommit: new Date(), upstreamGone: true, ahead: 0 },
+        { name: "gone-current", lastCommit: new Date(), upstreamGone: true, ahead: 0 },
+        { name: "live", lastCommit: new Date(), upstreamGone: false, ahead: 0 },
+      ],
+    };
+    expect(await runRepoAction(svc, { ...group, report }, "prune")).toBe("Deleted gone-a.");
+    close();
+    expect(io.runs.filter((r) => r.args[0] === "branch").map((r) => r.args.join(" "))).toEqual(["branch -d gone-a"]);
+  });
+
+  it("keeps pruning when one branch isn't fully merged", async () => {
+    const { io, svc, close, group } = await repoFixture((args) =>
+      args.join(" ") === "branch -d squashed"
+        ? { code: 1, stdout: "", stderr: "error: the branch 'squashed' is not fully merged" }
+        : ok(),
+    );
+    const report = {
+      ...projectReport([]),
+      branches: [
+        { name: "squashed", lastCommit: new Date(), upstreamGone: true, ahead: 0 },
+        { name: "merged", lastCommit: new Date(), upstreamGone: true, ahead: 0 },
+      ],
+    };
+    await runRepoAction(svc, { ...group, report }, "prune").catch(() => undefined);
+    close();
+    expect(io.runs.map((r) => r.args.join(" "))).toContain("branch -d merged");
+  });
+});
+
+describe("syncRepo failures", () => {
+  it("stops with git's message when the branch diverged", async () => {
+    const io = memoryIo(repoFiles, {
+      run: (program, args) => {
+        if (program !== "git") return ok();
+        if (args[0] === "status") return status("main", "origin/main", 1, 1);
+        if (args[0] === "remote" && args.length === 1) return ok("origin\n");
+        if (args[0] === "pull")
+          return { code: 128, stdout: "", stderr: "fatal: Not possible to fast-forward, aborting." };
+        return ok();
+      },
+    });
+    const { svc, close } = await testServices(io);
+    await svc.store.addProject({ id: "p1", name: "app", remote: "github.com/me/app", path: "/code/app" });
+    await expect(syncRepo(svc, "p1")).rejects.toThrow("Not possible to fast-forward");
+    close();
+    expect(io.runs.some((r) => r.args[0] === "push")).toBe(false);
+  });
+});
+
+const goneBranch = (name: string) => ({ name, lastCommit: new Date(), upstreamGone: true, ahead: 0 });
+
+describe("prune messages", () => {
+  it.for([
+    [[], [], "No merged branches to delete."],
+    [["a", "b"], [], "Deleted 2 merged branches."],
+    [["a"], ["s"], "Deleted a. Kept s: not fully merged."],
+    [[], ["s", "t"], "Kept s, t: not fully merged."],
+  ] as const)("deleted %j, kept %j says %s", async ([deleted, kept, message]) => {
+    const { svc, close, group } = await repoFixture((args) =>
+      args[0] === "branch" && kept.some((name) => args.includes(name))
+        ? { code: 1, stdout: "", stderr: "not merged" }
+        : ok(),
+    );
+    const report = { ...projectReport([]), branches: [...deleted, ...kept].map(goneBranch) };
+    expect(await runRepoAction(svc, { ...group, report }, "prune")).toBe(message);
+    close();
   });
 });

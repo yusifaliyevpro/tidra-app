@@ -143,11 +143,12 @@ export const netlify: DeployProvider = {
     if (!z.validate(NetlifySchema, sites)) return [];
     const results = await Promise.all(
       sites.map(async (site): Promise<Deployment | undefined> => {
+        // One site the token can't read must not hide every other site's deploy.
         const deploys = await getJson(
           fetcher,
           `https://api.netlify.com/api/v1/sites/${site.id}/deploys?per_page=1`,
           token,
-        );
+        ).catch(() => undefined);
         const latest = z.validate(NetlifyDeploys, deploys) ? deploys[0] : undefined;
         if (!latest) return undefined;
         const repo = site.build_settings?.repo_url;
