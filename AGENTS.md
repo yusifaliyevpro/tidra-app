@@ -64,9 +64,9 @@ Rules:
 - **`src/engine` never imports Tauri or React.** It receives an `Io` (`src/engine/io.ts`); tests pass fakes. Almost all logic should be testable in plain Node.
 - **Screens are registered in `src/app/modules.ts`** (sidebar, palette, `g` + key navigation); the screen itself is a file route in `src/routes`.
 - **Local-first**: views read SQLite snapshots through TanStack Query (`src/app/queries.ts`); background jobs (`src/services/jobs.ts`) write snapshots and invalidate queries. Rendering never waits on the network.
-- **Keep Rust thin.** Add a Rust command only for OS-level needs; prefer official plugins.
+- **Keep Rust thin.** Add a Rust command only for OS-level needs; prefer official plugins. A sync `#[tauri::command]` runs on the main thread and freezes the window while it works, so anything that blocks (SQLite, keychain, spawning a tool) uses `#[tauri::command(async)]`.
 - **Every plugin call needs a permission** in `src-tauri/capabilities/default.json`. A missing one rejects at runtime, which during startup blanks the app. Check new `@tauri-apps/*` calls against it.
-- **Network** from the webview goes through Rust's `http_fetch` (`src-tauri/src/http.rs`, wrapped as `io.fetch` in `src/core/native.ts`): one IPC call per request, a pooled client (about 3x faster on GitHub than the HTTP plugin, which opened a new connection each time), https only, no CORS (CSP `connect-src` is IPC only). It sends a `User-Agent`; GitHub answers 403 without one.
+- **Network** from the webview goes through Rust's `http_fetch` (`src-tauri/src/http.rs`, wrapped as `io.fetch` in `src/core/native.ts`): one IPC call per request, a pooled client (about 3x faster on GitHub than the HTTP plugin, which opened a new connection each time), https only (plain http just to this machine, for Ollama, Verdaccio and local sqld), no CORS (CSP `connect-src` is IPC only). It sends a `User-Agent`; GitHub answers 403 without one.
 - **Validation**: `@zod/mini`. `z.validate()` when only pass/fail + narrowing is needed; `safeParse()` only where the error is shown to the user; `z.compile()` hot schemas once at module level.
 - **Secrets** only via `src/core/secrets.ts` (keychain). Never in SQLite, logs or the repo. They sync only inside the encrypted vault.
 - **Sync providers** implement `SyncProvider` and register in `src/sync/registry.ts`; they move encrypted envelopes only and never touch crypto.
@@ -113,6 +113,8 @@ Rules:
 
 ## Testing conventions
 
+- A test that reproduces a known bug nobody fixes yet is `it.fails`, with a comment saying what's wrong; it turns red once the bug is gone, and then becomes a plain `it`.
+- CI only runs on Windows, so `#[cfg(not(windows))]` and `#[cfg(unix)]` Rust isn't compiled there. After changing such code, compile it some other way before pushing: this broke the macOS release once.
 - **Bugs are test-first.** When a bug is reported or found, first write a test that reproduces it and watch it fail, then fix the code until it passes. The test stays as the regression test.
 - **Features are code-first.** For a new feature, build it, then write tests that cover its behaviour before calling it done.
 - Tests live in `tests/`, mirroring `src/` (`tests/engine/spec.test.ts` for `src/engine/spec.ts`). No tests inside `src`.
@@ -132,6 +134,7 @@ Done:
 - Push and open a PR from Tidra (`BranchActions`); merging stays on GitHub, the app never merges
 - Updates run on the current branch unless the project turns on "Update on a new branch" (`tidra/deps-<date>`, then Open PR). They never commit, push or open a PR on their own: they stop after the checks. "Commit & Push" (menu: Commit, Push) commits everything with the latest uncommitted run's message (`commitProject`), and "Run checks" reruns the project's checks in an output dialog (update dialog and project page)
 - Actions updates commit on a `tidra/actions-<date>` branch cut from the default branch (never the current branch); each repo with outdated actions can copy a prompt for a coding agent (`actionsUpdatePrompt`)
+- Security overrides don't commit either: they record a run whose message Commit uses (`fixWithOverride`)
 - PR bodies list each package with its versions (`pullBody`), taken from the commit bodies
 - Sync (`syncRepo`, `SyncButton`): fetch origin and upstream (never `--all`, a contributor's deleted fork would fail it), fast-forward a fork's default branch to `upstream`, pull, push; never merges or rebases on its own
 - Scripts runs any project's scripts; starting one from a project page or Toolchain opens its live output in a dialog there

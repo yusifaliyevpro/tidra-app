@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Finding } from "@/engine/advisories";
 import { notifySecurity } from "@/services/jobs";
-import { listNotifications, notify } from "@/services/notify";
+import {
+  listNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+  notify,
+  NOTIFY_SETTING,
+} from "@/services/notify";
 import { securityKey } from "@/services/security";
 import { writeSnapshot } from "@/services/snapshot";
 import { memoryIo } from "../support/memory-io";
@@ -48,5 +54,43 @@ describe("notifySecurity", () => {
     const items = await listNotifications(svc);
     close();
     expect(items.map((n) => [n.title, n.body])).toEqual([["web: 2 new advisories", "In ws, undici"]]);
+  });
+});
+
+describe("notify", () => {
+  it("records each key once", async () => {
+    const { svc, close } = await setup();
+    await notify(svc, "ci", { key: "o/r:1", title: "first", body: "b" });
+    await notify(svc, "ci", { key: "o/r:1", title: "duplicate", body: "b" });
+    await notify(svc, "deploy", { key: "vercel:2", title: "second", body: "b", route: "/deploys" });
+    const list = await listNotifications(svc);
+    close();
+    expect(
+      list.map((n) => [n.key, n.title, n.read]).toSorted((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    ).toEqual([
+      ["ci:o/r:1", "first", false],
+      ["deploy:vercel:2", "second", false],
+    ]);
+  });
+
+  it("records nothing for kinds the user turned off", async () => {
+    const { svc, close } = await setup();
+    await svc.store.setSetting(NOTIFY_SETTING, { ci: false });
+    await notify(svc, "ci", { key: "x", title: "t", body: "b" });
+    await notify(svc, "major", { key: "y", title: "t", body: "b" });
+    const list = await listNotifications(svc);
+    close();
+    expect(list.map((n) => n.key)).toEqual(["major:y"]);
+  });
+
+  it("marks one or every notification read", async () => {
+    const { svc, close } = await setup();
+    await notify(svc, "ci", { key: "a", title: "t", body: "b" });
+    await notify(svc, "ci", { key: "b", title: "t", body: "b" });
+    await markNotificationRead(svc, "ci:a");
+    expect((await listNotifications(svc)).filter((n) => n.read).map((n) => n.key)).toEqual(["ci:a"]);
+    await markAllNotificationsRead(svc);
+    expect((await listNotifications(svc)).every((n) => n.read)).toBe(true);
+    close();
   });
 });

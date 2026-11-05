@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { SECRET_KEYS } from "@/core/secrets";
-import { checkCommands, refreshAllProjects, refreshProject, remotesUnchanged } from "@/services/projects";
+import {
+  addProject,
+  checkCommands,
+  readAllReports,
+  refreshAllProjects,
+  refreshProject,
+  remotesUnchanged,
+} from "@/services/projects";
 import { jsonResponse, memoryIo, ok, packument } from "../support/memory-io";
 import { testServices } from "../support/services";
 
@@ -126,5 +133,113 @@ describe("remotesUnchanged", () => {
 
   it("fetches when there is no GitHub token to ask with", async () => {
     expect(await check("origin/main aaa\norigin/feature bbb\n", false)).toBe(false);
+  });
+});
+
+const gitRemote = (remote?: string) => (_program: string, args: string[]) =>
+  args.join(" ") === "remote get-url origin" && remote ? ok(`${remote}\n`) : { code: 2, stdout: "", stderr: "" };
+
+it("names the project after its manifest and records the remote and folder inside the repo", async () => {
+  const io = memoryIo(
+    { "/mono/.git/HEAD": "ref", "/mono/apps/web/package.json": JSON.stringify({ name: "@me/web" }) },
+    { run: gitRemote("git@github.com:me/mono.git") },
+  );
+  const { svc, close } = await testServices(io);
+  const id = await addProject(svc, "/mono/apps/web");
+  const project = await svc.store.getProject(id);
+  close();
+  expect(project).toMatchObject({
+    name: "@me/web",
+    remote: "github.com/me/mono",
+    subdir: "apps/web",
+    path: "/mono/apps/web",
+  });
+});
+
+describe("addProject", () => {
+  it("falls back to the folder name for an unparsable manifest", async () => {
+    const { svc, close } = await testServices(
+      memoryIo({ "/code/my-app/package.json": "{ broken" }, { run: gitRemote() }),
+    );
+    const project = await svc.store.getProject(await addProject(svc, "/code/my-app"));
+    close();
+    expect(project).toMatchObject({ name: "my-app", remote: null, subdir: "" });
+  });
+
+  it("refuses a folder without package.json", async () => {
+    const { svc, close } = await testServices(memoryIo({}, { run: gitRemote() }));
+    await expect(addProject(svc, "/empty")).rejects.toThrow("No package.json in this folder.");
+    close();
+  });
+
+  it("reuses the project for the same folder, whatever its slashes", async () => {
+    const { svc, close } = await testServices(memoryIo({ "/code/app/package.json": "{}" }, { run: gitRemote() }));
+    const first = await addProject(svc, "/code/app");
+    const second = await addProject(svc, String.raw`\code\app`);
+    const all = await svc.store.listProjects();
+    close();
+    expect(second).toBe(first);
+    expect(all).toHaveLength(1);
+  });
+
+  it("links a project synced from another device by its remote and subfolder", async () => {
+    const io = memoryIo({ "/here/app/package.json": "{}" }, { run: gitRemote("https://github.com/me/app.git") });
+    const { svc, close } = await testServices(io);
+    await svc.store.addProject({ id: "synced", name: "app", remote: "github.com/me/app", path: "/elsewhere/app" });
+    const id = await addProject(svc, "/here/app");
+    const project = await svc.store.getProject(id);
+    close();
+    expect(id).toBe("synced");
+    expect(project?.path).toBe("/here/app");
+  });
+});
+
+describe("refreshProject reports", () => {
+  it("keeps git state and explains the problem when the manifest can't be read", async () => {
+    const io = memoryIo(
+      { "/web/package.json": "{ broken" },
+      { run: (_p, args) => (args[0] === "status" ? ok("# branch.oid a\n# branch.head main\n") : ok()) },
+    );
+    const { svc, close } = await testServices(io);
+    await svc.store.addProject({ id: "p1", name: "web", remote: null, path: "/web" });
+    const report = await refreshProject(svc, "p1");
+    close();
+    expect(report).toMatchObject({ outdated: [], error: "No readable package.json in /web", git: { branch: "main" } });
+  });
+
+  it("returns nothing for an unknown project", async () => {
+    const { svc, close } = await testServices();
+    expect(await refreshProject(svc, "missing")).toBeUndefined();
+    close();
+  });
+
+  it("lists direct dependencies of every importer for search and security", async () => {
+    const io = memoryIo({
+      "/web/package.json": JSON.stringify({
+        dependencies: { a: "^1.0.0" },
+        devDependencies: { b: "2.0.0" },
+        peerDependencies: { c: "*" },
+      }),
+    });
+    const { svc, close } = await testServices(io);
+    await svc.store.addProject({ id: "p1", name: "web", remote: null, path: "/web" });
+    const report = await refreshProject(svc, "p1");
+    const all = await readAllReports(svc);
+    close();
+    expect(report?.dependencies).toEqual([
+      { name: "a", spec: "^1.0.0", importer: ".", field: "dependencies" },
+      { name: "b", spec: "2.0.0", importer: ".", field: "devDependencies" },
+    ]);
+    expect(all.map(({ project, report: r }) => [project.id, r?.projectId])).toEqual([["p1", "p1"]]);
+  });
+});
+
+describe("addProject with a byte-order mark", () => {
+  it("still reads the manifest's name", async () => {
+    const io = memoryIo({ "/code/x/package.json": '\uFEFF{ "name": "from-manifest" }' });
+    const { svc, close } = await testServices(io);
+    const project = await svc.store.getProject(await addProject(svc, "/code/x"));
+    close();
+    expect(project?.name).toBe("from-manifest");
   });
 });

@@ -160,3 +160,37 @@ describe("createRegistryClient caching", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+describe("fetchWithRetry edge cases", () => {
+  it("waits as long as Retry-After asks", async () => {
+    const waits: number[] = [];
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("", { status: 429, headers: { "retry-after": "2" } }))
+      .mockResolvedValueOnce(new Response("ok"));
+    const response = await fetchWithRetry(fetcher, "https://x.dev", {}, { sleep: async (ms) => void waits.push(ms) });
+    expect(response.status).toBe(200);
+    expect(waits).toEqual([2000]);
+  });
+
+  it("returns the last retryable answer instead of throwing", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response("", { status: 503 }));
+    const response = await fetchWithRetry(fetcher, "https://x.dev", {}, noSleep);
+    expect(response.status).toBe(503);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it("aborts an attempt that takes longer than the timeout", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockImplementation(
+        (_url, init) =>
+          new Promise((_resolve, reject) =>
+            init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))),
+          ),
+      );
+    await expect(
+      fetchWithRetry(fetcher, "https://x.dev", {}, { ...noSleep, attempts: 1, timeoutMs: 5 }),
+    ).rejects.toThrow("aborted");
+  });
+});

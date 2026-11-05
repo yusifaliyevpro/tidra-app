@@ -75,3 +75,56 @@ describe("applyActionUpdates", () => {
     expect(applyActionUpdates(crlf, [{ line: 6, ref: "v5" }])).toContain("actions/checkout@v5\r\n");
   });
 });
+
+describe("actions edge cases", () => {
+  it.for([
+    ["v4", "major"],
+    ["4", "major"],
+    ["v4.1", "minor"],
+    ["v4.1.2", "full"],
+    ["4.1.2-beta.1", "full"],
+    ["main", "branch"],
+    ["release/v1", "branch"],
+    ["a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3", "sha"],
+    ["a4b5c6d", "branch"],
+  ])("%s is a %s ref", ([ref, style]) => {
+    expect(refStyle(ref ?? "")).toBe(style);
+  });
+
+  it("reads reusable workflows and single-quoted uses", () => {
+    const uses = parseWorkflowUses("    uses: 'org/shared/.github/workflows/ci.yml@v2'\n");
+    expect(uses).toMatchObject([
+      { line: 0, action: "org/shared/.github/workflows/ci.yml", repo: "org/shared", ref: "v2" },
+    ]);
+  });
+
+  it("ignores lines that only mention uses in a comment or a run script", () => {
+    expect(parseWorkflowUses("# uses: actions/checkout@v4\n  run: echo uses: a/b@v1\n")).toEqual([]);
+  });
+
+  it("has no current version for branch refs or SHA pins without a comment", () => {
+    expect(currentVersion({ line: 0, action: "a/b", repo: "a/b", ref: "main", style: "branch" })).toBeUndefined();
+    expect(currentVersion({ line: 0, action: "a/b", repo: "a/b", ref: "a".repeat(40), style: "sha" })).toBeUndefined();
+  });
+
+  it("writes a new major without the v when the old ref had none", () => {
+    const [use] = parseWorkflowUses("- uses: a/b@4\n");
+    expect(use && nextRef(use, "v5.2.0")).toEqual({ ref: "5" });
+  });
+
+  it("moves a SHA pin only when it knows the new SHA", () => {
+    const [use] = parseWorkflowUses(`- uses: a/b@${"a".repeat(40)} # v1.0.0\n`);
+    expect(use && nextRef(use, "v1.1.0")).toBeUndefined();
+    expect(use && nextRef(use, "v1.1.0", "b".repeat(40))).toEqual({ ref: "b".repeat(40), comment: "v1.1.0" });
+  });
+
+  it("skips update lines that no longer hold a uses", () => {
+    const text = "steps:\n  - run: echo\n";
+    expect(
+      applyActionUpdates(text, [
+        { line: 1, ref: "v5" },
+        { line: 9, ref: "v5" },
+      ]),
+    ).toBe(text);
+  });
+});
