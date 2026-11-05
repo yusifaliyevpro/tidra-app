@@ -90,6 +90,15 @@ export function parseNodeIndex(data: unknown): { lts?: string; current?: string 
   };
 }
 
+/** The release to compare an installed Node with: the newest of its own LTS line, otherwise the current release. */
+export function nodeUpdateTarget(data: unknown, installed: string | undefined): string | undefined {
+  if (!z.validate(NodeIndex, data)) return undefined;
+  const line = installed
+    ? data.find((release) => semver.major(release.version) === semver.major(installed))
+    : undefined;
+  return (line && line.lts !== false ? line : data[0])?.version.replace(/^v/, "");
+}
+
 /** `-EncodedCommand` payload: base64 of the script as UTF-16LE, so no quoting can break or inject. */
 export function encodePowerShell(script: string): string {
   let binary = "";

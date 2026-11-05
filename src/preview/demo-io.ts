@@ -132,6 +132,7 @@ export function createDemoIo(): Io {
   };
   return {
     homeDir: "/home/demo",
+    platform: "windows",
     env: {},
     fetch: (input, init) => globalThis.fetch(input, init),
     readText: async (path) => files.get(normalize(path)) ?? null,

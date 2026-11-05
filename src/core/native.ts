@@ -105,6 +105,7 @@ export function createTauriIo(env: AppEnv): Io {
     fetchPackument,
     env: env.vars,
     homeDir: env.homeDir.replaceAll("\\", "/"),
+    platform: env.platform,
   };
 }
 
