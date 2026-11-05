@@ -19,7 +19,7 @@ pub fn dedupe(raw: Vec<Listener>) -> Vec<Listener> {
     map.into_values().collect()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ports_list() -> Result<Vec<Listener>, String> {
     let all = listeners::get_all().map_err(|err| err.to_string())?;
     let raw = all

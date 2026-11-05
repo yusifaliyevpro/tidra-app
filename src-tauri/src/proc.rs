@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::State;
 use tauri::ipc::Channel;
@@ -32,7 +32,30 @@ pub struct SpawnRequest {
 #[derive(Default)]
 pub struct Processes {
     next_id: AtomicU32,
-    kills: Mutex<HashMap<u32, oneshot::Sender<()>>>,
+    kills: Arc<Mutex<HashMap<u32, oneshot::Sender<()>>>>,
+}
+
+impl Processes {
+    fn register(&self) -> Result<(u32, oneshot::Receiver<()>), String> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
+        let (kill_tx, kill_rx) = oneshot::channel();
+        self.kills.lock().map_err(|err| err.to_string())?.insert(id, kill_tx);
+        Ok((id, kill_rx))
+    }
+
+    fn kill(&self, id: u32) -> Result<(), String> {
+        if let Some(tx) = self.kills.lock().map_err(|err| err.to_string())?.remove(&id) {
+            let _ = tx.send(());
+        }
+        Ok(())
+    }
+}
+
+/// Every spawn registers a kill switch; without this the map grows by one per git call for the whole session.
+fn forget(kills: &Mutex<HashMap<u32, oneshot::Sender<()>>>, id: u32) {
+    if let Ok(mut kills) = kills.lock() {
+        kills.remove(&id);
+    }
 }
 
 /// Resolves a bare program name through PATH (and PATHEXT on Windows) so `.cmd` shims like `pnpm.cmd` run.
@@ -94,10 +117,14 @@ async fn join_all(tasks: Vec<JoinHandle<()>>) {
     }
 }
 
-fn kill_tree(pid: u32) {
+/// How long a stopped process gets to exit on its own before it is killed outright.
+const STOP_GRACE: Duration = Duration::from_secs(5);
+
+fn kill_tree(pid: u32, force: bool) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
+        let _ = force;
         let _ = std::process::Command::new("taskkill")
             .args(["/T", "/F", "/PID", &pid.to_string()])
             .creation_flags(0x0800_0000)
@@ -105,7 +132,8 @@ fn kill_tree(pid: u32) {
     }
     #[cfg(unix)]
     {
-        let _ = std::process::Command::new("kill").args(["-TERM", &format!("-{pid}")]).status();
+        let signal = if force { "-KILL" } else { "-TERM" };
+        let _ = std::process::Command::new("kill").args([signal, &format!("-{pid}")]).status();
     }
 }
 
@@ -132,9 +160,8 @@ pub async fn proc_spawn(
 
     let mut child = command.spawn().map_err(|err| err.to_string())?;
     let pid = child.id().unwrap_or_default();
-    let id = state.next_id.fetch_add(1, Ordering::Relaxed) + 1;
-    let (kill_tx, kill_rx) = oneshot::channel();
-    state.kills.lock().map_err(|err| err.to_string())?.insert(id, kill_tx);
+    let (id, kill_rx) = state.register()?;
+    let kills = state.kills.clone();
 
     let stdout = child.stdout.take().map(|out| tokio::spawn(pump(out, on_event.clone(), false)));
     let stderr = child.stderr.take().map(|err| tokio::spawn(pump(err, on_event.clone(), true)));
@@ -143,10 +170,17 @@ pub async fn proc_spawn(
         let status = tokio::select! {
             status = child.wait() => status.ok(),
             _ = kill_rx => {
-                kill_tree(pid);
-                child.wait().await.ok()
+                kill_tree(pid, false);
+                match tokio::time::timeout(STOP_GRACE, child.wait()).await {
+                    Ok(status) => status.ok(),
+                    Err(_) => {
+                        kill_tree(pid, true);
+                        child.wait().await.ok()
+                    }
+                }
             }
         };
+        forget(&kills, id);
         drain_pipes([stdout, stderr].into_iter().flatten().collect(), PIPE_GRACE).await;
         let _ = on_event.send(ProcEvent::Exit { code: status.and_then(|s| s.code()) });
     });
@@ -156,19 +190,22 @@ pub async fn proc_spawn(
 
 #[tauri::command]
 pub fn proc_kill(id: u32, state: State<'_, Processes>) -> Result<(), String> {
-    if let Some(tx) = state.kills.lock().map_err(|err| err.to_string())?.remove(&id) {
-        let _ = tx.send(());
-    }
-    Ok(())
+    state.kill(id)
 }
 
 /// Kills any process by pid, used to free a port held by a process Tidra did not start.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn process_kill(pid: u32) {
-    kill_tree(pid);
+    #[cfg(windows)]
+    kill_tree(pid, true);
+    // Not one of ours, so it doesn't lead a process group the way kill_tree expects.
+    #[cfg(unix)]
+    {
+        let _ = std::process::Command::new("kill").args(["-TERM", &pid.to_string()]).status();
+    }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn proc_which(program: String) -> Option<String> {
     resolve_program(&program).ok().map(|path| path.to_string_lossy().into_owned())
 }
@@ -185,6 +222,84 @@ mod tests {
             tokio::time::timeout(Duration::from_secs(1), drain_pipes(vec![stuck, done], Duration::from_millis(50)))
                 .await;
         assert!(drained.is_ok());
+    }
+
+    use tauri::ipc::InvokeResponseBody;
+    use tokio::io::AsyncWriteExt;
+
+    type Events = Arc<Mutex<Vec<String>>>;
+
+    fn recording_channel() -> (Channel<ProcEvent>, Events) {
+        let events: Events = Arc::default();
+        let sink = events.clone();
+        let channel = Channel::new(move |body| {
+            if let InvokeResponseBody::Json(json) = body {
+                sink.lock().unwrap().push(json);
+            }
+            Ok(())
+        });
+        (channel, events)
+    }
+
+    #[tokio::test]
+    async fn pump_never_splits_a_character_across_events() {
+        let (channel, events) = recording_channel();
+        let (mut writer, reader) = tokio::io::duplex(64);
+        let task = tokio::spawn(pump(reader, channel, false));
+        let bytes = "ok ✓".as_bytes();
+        writer.write_all(&bytes[..4]).await.unwrap();
+        writer.flush().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        writer.write_all(&bytes[4..]).await.unwrap();
+        drop(writer);
+        task.await.unwrap();
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(events[0].contains(r#""kind":"stdout""#) && events[0].contains(r#""data":"ok ""#));
+        assert!(events[1].contains('✓'));
+    }
+
+    #[tokio::test]
+    async fn pump_flushes_a_cut_off_character_at_the_end_and_tags_stderr() {
+        let (channel, events) = recording_channel();
+        let (mut writer, reader) = tokio::io::duplex(64);
+        let task = tokio::spawn(pump(reader, channel, true));
+        writer.write_all(&"✓".as_bytes()[..2]).await.unwrap();
+        drop(writer);
+        task.await.unwrap();
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(events[0].contains(r#""kind":"stderr""#));
+    }
+
+    #[tokio::test]
+    async fn kill_reaches_the_process_and_forget_clears_its_switch() {
+        let processes = Processes::default();
+        let (first, kill_rx) = processes.register().unwrap();
+        let (second, _keep) = processes.register().unwrap();
+        assert_ne!(first, second);
+        processes.kill(first).unwrap();
+        assert!(kill_rx.await.is_ok());
+        processes.kill(first).unwrap();
+        assert_eq!(processes.kills.lock().unwrap().len(), 1);
+        forget(&processes.kills, second);
+        assert!(processes.kills.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn events_serialize_the_way_the_webview_reads_them() {
+        let exit = serde_json::to_string(&ProcEvent::Exit { code: Some(3) }).unwrap();
+        assert_eq!(exit, r#"{"kind":"exit","code":3}"#);
+        let out = serde_json::to_string(&ProcEvent::Stdout { data: "x".into() }).unwrap();
+        assert_eq!(out, r#"{"kind":"stdout","data":"x"}"#);
+    }
+
+    #[test]
+    fn spawn_requests_read_camel_case_and_optional_fields() {
+        let request: SpawnRequest = serde_json::from_str(r#"{"program":"git","args":["status"]}"#).unwrap();
+        assert_eq!(request.program, "git");
+        assert_eq!(request.args, ["status"]);
+        assert!(request.cwd.is_none() && request.env.is_none());
     }
 
     #[test]
