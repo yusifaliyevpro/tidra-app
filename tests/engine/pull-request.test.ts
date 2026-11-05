@@ -2,20 +2,38 @@ import { describe, expect, it } from "vitest";
 import { nextPullTitle, pullBody, pullTitle } from "@/engine/pull-request";
 
 const backend = "chore(deps): bump hono 4.9.0 → 4.10.1";
-const frontend = "chore(deps): bump 2 dependencies\n\n- oxfmt 0.75.0 → 0.76.0\n- vite 8.3.4 → 8.3.5";
+const frontend = "chore(deps): bump oxfmt and vite\n\n- oxfmt 0.75.0 → 0.76.0\n- vite 8.3.4 → 8.3.5";
+const summary = "chore(deps): bump oxfmt, hono and vite";
 
 describe("pullTitle", () => {
-  it("uses the only commit's subject, else a summary", () => {
+  it("uses the only commit's subject", () => {
     expect(pullTitle([backend])).toBe(backend);
-    expect(pullTitle([frontend])).toBe("chore(deps): bump 2 dependencies");
-    expect(pullTitle([backend, frontend])).toBe("chore(deps): update dependencies");
+    expect(pullTitle([frontend])).toBe("chore(deps): bump oxfmt and vite");
+  });
+
+  it("sums up several commits by their packages, riskiest first", () => {
+    expect(pullTitle([backend, frontend])).toBe(summary);
+  });
+
+  it("reads the packages of commits in the older subject format", () => {
+    const older = "chore(deps): bump 2 dependencies\n\n- oxfmt 0.75.0 → 0.76.0\n- vite 8.3.4 → 8.3.5";
+    expect(pullTitle([backend, older])).toBe(summary);
+  });
+
+  it("ignores commits that aren't bumps", () => {
+    expect(pullTitle([backend, "chore: move foo → bar"])).toBe("chore(deps): bump hono");
+  });
+
+  it("falls back to a generic title when no commit names a package", () => {
+    expect(pullTitle(["fix: one", "fix: two"])).toBe("chore(deps): update dependencies");
   });
 });
 
 describe("nextPullTitle", () => {
   it("moves a generated title to the summary once more commits arrive", () => {
-    expect(nextPullTitle(backend, [backend, frontend])).toBe("chore(deps): update dependencies");
-    expect(nextPullTitle("chore(deps): update dependencies", [backend, frontend])).toBeUndefined();
+    expect(nextPullTitle(backend, [backend, frontend])).toBe(summary);
+    expect(nextPullTitle("chore(deps): update dependencies", [backend, frontend])).toBe(summary);
+    expect(nextPullTitle(summary, [backend, frontend])).toBeUndefined();
   });
 
   it("keeps a title someone wrote", () => {
