@@ -146,3 +146,87 @@ describe("helpers", () => {
     expect(urls).toContain("https://raw.githubusercontent.com/o/r/HEAD/CHANGELOG.md");
   });
 });
+
+describe("versionFromTag edge cases", () => {
+  it.for([
+    ["release-1.2.3", "1.2.3"],
+    ["v1.2.3-beta.1", "1.2.3-beta.1"],
+    ["2024-01-01", undefined],
+    ["nightly", undefined],
+  ])("reads %s as %s", ([tag, version]) => {
+    expect(versionFromTag(tag ?? "", "pkg")).toBe(version);
+  });
+
+  it("matches scoped monorepo tags exactly", () => {
+    expect(versionFromTag("@scope/pkg@1.0.0", "@scope/pkg")).toBe("1.0.0");
+    expect(versionFromTag("@scope/pkg-extra@1.0.0", "@scope/pkg")).toBeUndefined();
+  });
+});
+
+describe("releasesBetween edge cases", () => {
+  it("lists every release up to the target when the installed version is unknown", () => {
+    const entries = releasesBetween(
+      [release("v1.0.0"), release("v1.1.0"), release("v2.0.0")],
+      "pkg",
+      undefined,
+      "1.1.0",
+    );
+    expect(entries.map((e) => e.version)).toEqual(["1.0.0", "1.1.0"]);
+  });
+
+  it("falls back to the tag as the title", () => {
+    expect(releasesBetween([release("v1.1.0")], "pkg", "1.0.0", "1.1.0")[0]?.title).toBe("v1.1.0");
+  });
+
+  it("skips prerelease versions even when GitHub doesn't mark them", () => {
+    expect(
+      releasesBetween([release("v1.1.0-rc.1"), release("v1.1.0")], "pkg", "1.0.0", "1.1.0").map((e) => e.version),
+    ).toEqual(["1.1.0"]);
+  });
+
+  it("flags 0.x minor releases as breaking", () => {
+    expect(releasesBetween([release("v0.5.0")], "pkg", "0.4.2", "0.5.0")[0]?.breaking).toBe(true);
+  });
+});
+
+describe("parseChangelogMarkdown edge cases", () => {
+  it("reads version headings in common shapes", () => {
+    const markdown = [
+      "# Changelog",
+      "## [Unreleased]",
+      "- wip",
+      "## Version 2.0.0",
+      "- two",
+      "## v1.1.0 (2024-01-01)",
+      "- one one",
+      "# 1.0.0-beta.1",
+      "- beta",
+    ].join("\n");
+    expect(parseChangelogMarkdown(markdown).map((e) => [e.version, e.body])).toEqual([
+      ["2.0.0", "- two"],
+      ["1.1.0", "- one one"],
+      ["1.0.0-beta.1", "- beta"],
+    ]);
+  });
+
+  it("reads CRLF files", () => {
+    expect(parseChangelogMarkdown("## 1.0.0\r\n- a\r\n").map((e) => e.body)).toEqual(["- a"]);
+  });
+
+  it("returns nothing for a file without versions", () => {
+    expect(parseChangelogMarkdown("# Notes\nNothing here")).toEqual([]);
+  });
+});
+
+describe("sectionsBetween edge cases", () => {
+  it("skips sections whose heading isn't valid semver and marks a new major as breaking", () => {
+    const entries = [
+      { version: "2.0.0", title: "2.0.0", body: "", breaking: false },
+      { version: "1.5.0", title: "1.5.0", body: "", breaking: false },
+    ];
+    expect(sectionsBetween(entries, "1.4.0", "2.0.0").map((e) => [e.version, e.breaking])).toEqual([
+      ["1.5.0", false],
+      ["2.0.0", true],
+    ]);
+  });
+});

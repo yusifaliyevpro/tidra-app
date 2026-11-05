@@ -7,12 +7,13 @@ import {
   repoOf,
   sectionsBetween,
   tagPackage,
+  versionFromTag,
   type ChangelogEntry,
   type Release,
   type RepoRef,
 } from "@/engine/changelog";
 import { emptyConfig } from "@/engine/npmrc";
-import { GitHubError } from "@/integrations/github";
+import { GitHubError, RELEASES_PER_PAGE } from "@/integrations/github";
 import type { Services } from "./context";
 import { cached, HOUR } from "./snapshot";
 
@@ -23,11 +24,42 @@ export interface ChangelogResult {
   rateLimited: boolean;
 }
 
-async function releasesOf(svc: Services, owner: string, repo: string): Promise<Release[]> {
-  const result = await cached(svc, `releases:${owner}/${repo}`.toLowerCase(), 6 * HOUR, async () => ({
-    releases: await (await svc.github()).releases(owner, repo),
+async function releasesOf(svc: Services, owner: string, repo: string, page = 1): Promise<Release[]> {
+  const key = `releases:${owner}/${repo}${page > 1 ? `:${page}` : ""}`.toLowerCase();
+  const result = await cached(svc, key, 6 * HOUR, async () => ({
+    releases: await (await svc.github()).releases(owner, repo, page),
   }));
   return result.releases;
+}
+
+const MAX_RELEASE_PAGES = 5;
+
+/** Repos publishing many canaries push stable releases off the first page, so read on until `from` is reached. */
+async function releasesCovering(
+  svc: Services,
+  repo: RepoRef,
+  name: string,
+  from: string | undefined,
+  to: string,
+): Promise<Release[]> {
+  const all: Release[] = [];
+  for (let page = 1; page <= MAX_RELEASE_PAGES; page++) {
+    const batch = await releasesOf(svc, repo.owner, repo.repo, page).catch((error: unknown) => {
+      if (page === 1) throw error;
+      return [];
+    });
+    all.push(...batch);
+    if (batch.length < RELEASES_PER_PAGE) break;
+    const oldest = from ?? to;
+    if (
+      batch.some((release) => {
+        const version = versionFromTag(release.tag, name);
+        return version !== undefined && semver.lte(version, oldest);
+      })
+    )
+      break;
+  }
+  return all;
 }
 
 async function changelogFile(svc: Services, repo: RepoRef): Promise<string | undefined> {
@@ -53,13 +85,17 @@ export async function changelogFor(
   from: string | undefined,
   to: string,
 ): Promise<ChangelogResult> {
-  const packument = await svc.registry(emptyConfig()).full(name);
+  // Packages on a private registry just have no notes here; the default config can't read them.
+  const packument = await svc
+    .registry(emptyConfig())
+    .full(name)
+    .catch(() => null);
   const repo = packument ? repoOf(packument, to) : undefined;
   if (!repo) return { entries: [], source: "none", rateLimited: false };
 
   let rateLimited = false;
   try {
-    const entries = releasesBetween(await releasesOf(svc, repo.owner, repo.repo), name, from, to);
+    const entries = releasesBetween(await releasesCovering(svc, repo, name, from, to), name, from, to);
     if (entries.length > 0) return { repo, entries, source: "releases", rateLimited };
   } catch (error) {
     if (!(error instanceof GitHubError)) throw error;

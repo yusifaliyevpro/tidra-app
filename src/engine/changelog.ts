@@ -1,6 +1,7 @@
 import semver from "semver";
 import { githubSlug } from "./git";
 import type { Packument } from "./registry";
+import { classifyBump } from "./versions";
 
 export interface RepoRef {
   owner: string;
@@ -54,6 +55,10 @@ export function tagPackage(tag: string): string | undefined {
   return at > 0 && semver.valid(semver.clean(tag.slice(at + 1)) ?? "") ? tag.slice(0, at) : undefined;
 }
 
+/** Same rule as the update list: a new major, or a minor under 1.0, is breaking. */
+const breakingBump = (from: string | undefined, version: string) =>
+  from !== undefined && classifyBump(from, version) === "major";
+
 const BREAKING = /breaking change|⚠️\s*breaking|^#+\s*(major changes|breaking)/im;
 
 export function isBreaking(text: string): boolean {
@@ -80,7 +85,7 @@ export function releasesBetween(
       body: release.body,
       publishedAt: release.publishedAt,
       url: release.url,
-      breaking: semver.major(version) !== semver.major(from ?? version) || isBreaking(release.body),
+      breaking: breakingBump(from, version) || isBreaking(release.body),
     });
   }
   return entries.toSorted((a, b) => semver.compare(a.version, b.version));
@@ -115,7 +120,7 @@ export function parseChangelogMarkdown(markdown: string, packageName?: string): 
 export function sectionsBetween(entries: ChangelogEntry[], from: string | undefined, to: string): ChangelogEntry[] {
   return entries
     .filter((e) => semver.valid(e.version) && semver.lte(e.version, to) && (!from || semver.gt(e.version, from)))
-    .map((e) => ({ ...e, breaking: e.breaking || semver.major(e.version) !== semver.major(from ?? e.version) }))
+    .map((e) => ({ ...e, breaking: e.breaking || breakingBump(from, e.version) }))
     .toSorted((a, b) => semver.compare(a.version, b.version));
 }
 
