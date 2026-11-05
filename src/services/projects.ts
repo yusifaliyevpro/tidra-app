@@ -1,6 +1,6 @@
 import { ulid } from "ulid";
 import type { ProjectWithPath } from "@/core/store";
-import { findProjects, findRepoRoot } from "@/engine/discover";
+import { findProjects, findRepoRoot, repoLabel } from "@/engine/discover";
 import { createGit, githubSlug, normalizeRemote, type BranchInfo, type ForkInfo, type GitStatus } from "@/engine/git";
 import { createLimit } from "@/engine/limit";
 import { computeOutdated, DEFAULT_MAJOR_PINS, type OutdatedEntry } from "@/engine/outdated";
@@ -96,12 +96,20 @@ type GitInfo = [GitStatus | undefined, BranchInfo[], ForkInfo | undefined];
 /** Git state belongs to the checkout, so packages of one repo share a single set of git calls. */
 export type GitInfoCache = Map<string, Promise<GitInfo>>;
 
+/** Goes up whenever a checkout's git state changes, so answers read before that are never used after it. */
+const gitEpochs = new Map<string, number>();
+const gitEpoch = (root: string) => gitEpochs.get(root) ?? 0;
+const gitCacheKey = (root: string) => `${root}#${gitEpoch(root)}`;
+
+export const checkoutRoot = (p: ProjectWithPath) =>
+  p.path && p.subdir ? p.path.slice(0, -(p.subdir.length + 1)) : p.path;
+
 function readGitInfo(svc: Services, project: ProjectWithPath & { path: string }, cache?: GitInfoCache) {
-  const root = project.subdir ? project.path.slice(0, -(project.subdir.length + 1)) : project.path;
-  const hit = cache?.get(root);
+  const root = checkoutRoot(project) ?? project.path;
+  const hit = cache?.get(gitCacheKey(root));
   if (hit) return hit;
   const info = gitInfoAt(svc, root);
-  cache?.set(root, info);
+  cache?.set(gitCacheKey(root), info);
   return info;
 }
 
@@ -202,11 +210,75 @@ export async function refreshProject(
 ): Promise<ProjectReport | undefined> {
   const project = await svc.store.getProject(projectId);
   if (!project) return undefined;
+  const refresh = (latestRefresh.get(projectId) ?? 0) + 1;
+  latestRefresh.set(projectId, refresh);
+  const root = checkoutRoot(project);
+  const epoch = root ? gitEpoch(root) : 0;
   const previous = options.force ? undefined : await readReport(svc, projectId);
-  const report = await buildReport(svc, project, previous, options.gitCache);
+  const built = await buildReport(svc, project, previous, options.gitCache);
+  // A newer refresh has seen newer files (a branch switch, say); this one must not write over it.
+  if (latestRefresh.get(projectId) !== refresh) return built;
+  const report = root && gitEpoch(root) !== epoch ? withGitInfo(built, await gitInfoAt(svc, root)) : built;
   await writeSnapshot(svc, reportKey(projectId), report);
   svc.invalidate(["report", projectId], ["reports"], ["home"], ["palette"]);
   return report;
+}
+
+const latestRefresh = new Map<string, number>();
+
+const withGitInfo = (report: ProjectReport, [git, branches, fork]: GitInfo): ProjectReport => ({
+  ...report,
+  git,
+  branches,
+  fork,
+});
+
+/**
+ * Rereads a checkout's git state into its reports, leaving everything else alone. Takes tens of milliseconds, so the
+ * screen can show a switch, pull or fetch at once. Returns whether anything changed.
+ */
+export async function writeGitState(svc: Services, root: string, projectIds: string[]): Promise<boolean> {
+  gitEpochs.set(root, gitEpoch(root) + 1);
+  const info = await gitInfoAt(svc, root);
+  const reports = await readSnapshots<ProjectReport>(svc, projectIds.map(reportKey));
+  const fresh = JSON.stringify(info);
+  const stale = projectIds.flatMap((id, i) => {
+    const report = reports[i];
+    return report && JSON.stringify([report.git, report.branches, report.fork]) !== fresh ? [{ id, report }] : [];
+  });
+  await Promise.all(stale.map(({ id, report }) => writeSnapshot(svc, reportKey(id), withGitInfo(report, info))));
+  return stale.length > 0;
+}
+
+/** Everything about the working tree may have changed (pulled commits, another branch): reads it again, registry too. */
+export function refreshInBackground(svc: Services, projectIds: string[]) {
+  const gitCache: GitInfoCache = new Map();
+  void Promise.all(projectIds.map((id) => refreshProject(svc, id, { gitCache }))).catch(() => undefined);
+}
+
+export interface Checkout {
+  root: string;
+  label: string;
+  remote: string | null;
+  projectIds: string[];
+}
+
+/** The checkout a project lives in and the packages sharing it. Reads no reports: this runs on every git action. */
+export async function checkoutOf(svc: Services, projectId: string): Promise<Checkout> {
+  const projects = await svc.store.listProjects();
+  const project = projects.find((p) => p.id === projectId);
+  // A package synced from another device has no folder here, but a sibling in the same repo may.
+  const root =
+    project &&
+    (checkoutRoot(project) ??
+      projects.flatMap((p) => (p.remote && p.remote === project.remote ? (checkoutRoot(p) ?? []) : []))[0]);
+  if (!project || !root) throw new Error("This project has no folder on this device.");
+  return {
+    root,
+    label: project.subdir ? (repoLabel(project.remote, root) ?? project.name) : project.name,
+    remote: project.remote,
+    projectIds: projects.filter((p) => checkoutRoot(p) === root).map((p) => p.id),
+  };
 }
 
 /**
@@ -222,7 +294,7 @@ export async function refreshAllProjects(svc: Services, signal?: AbortSignal): P
   for (const root of roots) {
     const fetched = fetchLimit(async () => (signal?.aborted ? undefined : fetchCheckout(svc, root, signal)));
     gitCache.set(
-      root,
+      gitCacheKey(root),
       fetched.then(() => gitInfoAt(svc, root)),
     );
   }
@@ -234,11 +306,9 @@ export async function refreshAllProjects(svc: Services, signal?: AbortSignal): P
 }
 
 const FETCH_TIMEOUT_MS = 20_000;
-const FETCH_FRESH_MS = 5 * 60_000;
-/** When each checkout was last fetched this session, so opening a project doesn't refetch every time. */
+const FETCH_FRESH_MS = 60_000;
+/** When each checkout was last fetched this session, so moving between screens doesn't refetch every time. */
 const lastFetched = new Map<string, number>();
-
-const checkoutRoot = (p: ProjectWithPath) => (p.path && p.subdir ? p.path.slice(0, -(p.subdir.length + 1)) : p.path);
 
 /**
  * One quiet `git fetch` with a time limit; a slow or unreachable remote never blocks anything. Skipped when GitHub's
@@ -296,19 +366,40 @@ export async function remotesUnchanged(svc: Services, root: string): Promise<boo
 }
 
 /**
- * Fetches the project's checkout, then refreshes every package in it, so commits waiting upstream show as a Sync
- * count. Skipped when it was fetched in the last few minutes unless `force`. Returns whether it fetched.
+ * Fetches a checkout and updates its git state, so commits waiting upstream show as a Sync count. Fetching doesn't
+ * touch the working tree, so there is no need to ask the registry again. Skipped when it just ran, unless `force`.
  */
+async function fetchAndShow(svc: Services, checkout: { root: string; projectIds: string[] }, force = false) {
+  const { root, projectIds } = checkout;
+  if (!force && Date.now() - (lastFetched.get(root) ?? 0) < FETCH_FRESH_MS) return false;
+  await fetchCheckout(svc, root);
+  const changed = await writeGitState(svc, root, projectIds);
+  if (changed) svc.invalidate(...projectIds.map((id) => ["report", id]), ["reports"], ["home"], ["palette"]);
+  svc.invalidate(["branches"], ["branch-pull"]);
+  return true;
+}
+
+/** Keeps a project's Sync count current: runs when its page opens and after a branch switch. Returns whether it fetched. */
 export async function fetchProject(svc: Services, projectId: string, options: { force?: boolean } = {}) {
   const project = await svc.store.getProject(projectId);
-  const root = project ? checkoutRoot(project) : undefined;
-  if (!project?.remote || !root) return false;
-  if (!options.force && Date.now() - (lastFetched.get(root) ?? 0) < FETCH_FRESH_MS) return false;
-  await fetchCheckout(svc, root);
-  const members = (await svc.store.listProjects()).filter((p) => checkoutRoot(p) === root);
-  const gitCache: GitInfoCache = new Map();
-  await Promise.all(members.map((p) => refreshProject(svc, p.id, { gitCache })));
-  return true;
+  if (!project?.remote) return false;
+  const checkout = await checkoutOf(svc, projectId).catch(() => undefined);
+  return checkout ? fetchAndShow(svc, checkout, options.force) : false;
+}
+
+/** The same for every repo, when a screen with Sync buttons opens or the window regains focus. */
+export async function fetchAllCheckouts(svc: Services): Promise<void> {
+  const projects = (await svc.store.listProjects()).filter((p) => p.remote);
+  const limit = createLimit(8);
+  const checkouts = Map.groupBy(
+    projects.filter((p) => p.path),
+    (p) => checkoutRoot(p) ?? "",
+  );
+  await Promise.all(
+    [...checkouts].map(([root, members]) =>
+      limit(() => fetchAndShow(svc, { root, projectIds: members.map((p) => p.id) }).catch(() => false)),
+    ),
+  );
 }
 
 export async function readAllReports(svc: Services): Promise<{ project: ProjectWithPath; report?: ProjectReport }[]> {

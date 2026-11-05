@@ -3,8 +3,7 @@ import { runs } from "@/core/db/schema";
 import { createGit, githubSlug, isClean, type GitStatus } from "@/engine/git";
 import { nextPullTitle, pullBody, pullTitle } from "@/engine/pull-request";
 import type { Services } from "./context";
-import { refreshProject, type GitInfoCache } from "./projects";
-import { listRepos } from "./repos";
+import { checkoutOf, refreshProject, type GitInfoCache } from "./projects";
 
 export const UPDATE_BRANCH_PREFIX = "tidra/deps-";
 
@@ -51,9 +50,9 @@ async function commitChanges(svc: Services, projectId: string): Promise<string> 
 
 /** Rereads git state for every package of the project's repo. */
 async function refreshRepo(svc: Services, projectId: string) {
-  const members = (await listRepos(svc)).find((r) => r.projects.some((p) => p.id === projectId))?.projects ?? [];
+  const { projectIds } = await checkoutOf(svc, projectId);
   const gitCache: GitInfoCache = new Map();
-  await Promise.all(members.map((p) => refreshProject(svc, p.id, { gitCache })));
+  await Promise.all(projectIds.map((id) => refreshProject(svc, id, { gitCache })));
 }
 
 /** An update left its changes uncommitted, so the project page offers Commit on any branch. */

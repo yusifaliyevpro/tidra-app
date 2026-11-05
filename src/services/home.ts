@@ -1,6 +1,6 @@
 import * as z from "@zod/mini";
-import { desc, eq } from "drizzle-orm";
-import { dismissals, runs } from "@/core/db/schema";
+import { eq } from "drizzle-orm";
+import { dismissals } from "@/core/db/schema";
 import { DEFAULT_CI_THRESHOLD, wouldFailCi, type CiThreshold, type Severity } from "@/engine/advisories";
 import { runFailed } from "@/integrations/github";
 import { readAllActions } from "./actions";
@@ -9,7 +9,7 @@ import type { Services } from "./context";
 import { readDeploys } from "./deploys";
 import { readBotPulls, readCi, readInbox } from "./github-feed";
 import { readAllReports } from "./projects";
-import { listRepos } from "./repos";
+import { groupRepos } from "./repos";
 import { readAllSecurity } from "./security";
 import { readSnapshot } from "./snapshot";
 
@@ -64,7 +64,6 @@ export interface HomeSummary {
   actions: { outdated: number; repos: number };
   git: { dirty: number; unpushed: number; behind: number };
   health: ProjectHealth[];
-  runs: { id: string; projectId: string; project: string; title: string; ok: boolean | null; startedAt: string }[];
   releases: TimelineItem[];
 }
 
@@ -114,20 +113,18 @@ function ciStates(entries: NonNullable<Awaited<ReturnType<typeof readCi>>>["entr
 }
 
 export async function homeSummary(svc: Services): Promise<HomeSummary> {
-  const [reports, inbox, ci, bots, deploys, threshold, dismissed, repos, actions, timeline, recentRuns] =
-    await Promise.all([
-      readAllReports(svc),
-      readInbox(svc),
-      readCi(svc),
-      readBotPulls(svc),
-      readDeploys(svc),
-      readCiThreshold(svc),
-      dismissedAdvisories(svc),
-      listRepos(svc),
-      readAllActions(svc),
-      readSnapshot<{ items: TimelineItem[] }>(svc, "watched-releases"),
-      svc.store.db.select().from(runs).orderBy(desc(runs.startedAt)).limit(8),
-    ]);
+  const reports = await readAllReports(svc);
+  const repos = groupRepos(reports);
+  const [inbox, ci, bots, deploys, threshold, dismissed, actions, timeline] = await Promise.all([
+    readInbox(svc),
+    readCi(svc),
+    readBotPulls(svc),
+    readDeploys(svc),
+    readCiThreshold(svc),
+    dismissedAdvisories(svc),
+    readAllActions(svc, repos),
+    readSnapshot<{ items: TimelineItem[] }>(svc, "watched-releases"),
+  ]);
   const securityReports = await readAllSecurity(
     svc,
     reports.map(({ project }) => project.id),
@@ -181,7 +178,6 @@ export async function homeSummary(svc: Services): Promise<HomeSummary> {
     if (!latestDeployPerProject.has(`${d.provider}:${d.project}`))
       latestDeployPerProject.set(`${d.provider}:${d.project}`, d);
 
-  const names = new Map(reports.map(({ project }) => [project.id, project.name]));
   const repoGit = repos.map((r) => r.report?.git);
 
   return {
@@ -208,14 +204,6 @@ export async function homeSummary(svc: Services): Promise<HomeSummary> {
       behind: repoGit.filter((g) => (g?.behind ?? 0) > 0).length,
     },
     health: health.toSorted((a, b) => b.score - a.score || a.name.localeCompare(b.name)),
-    runs: recentRuns.map((run) => ({
-      id: run.id,
-      projectId: run.projectId,
-      project: names.get(run.projectId) ?? "Removed project",
-      title: run.title,
-      ok: run.ok,
-      startedAt: run.startedAt,
-    })),
     releases: (timeline?.data.items ?? []).slice(0, 8),
   };
 }

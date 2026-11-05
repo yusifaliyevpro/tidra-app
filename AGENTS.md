@@ -28,7 +28,9 @@ Verification before calling work done: `pnpm fmt && pnpm check`.
 
 ## Debugging the running app
 
-When a bug only shows in the real app (stale UI, a job that never ends), look at it instead of guessing. `pnpm web` only has demo data and no Tauri, so most real bugs need `pnpm dev` with the webview's debug port open:
+**Never test or verify anything with `pnpm web` or in a browser. Always use the dev app (`pnpm dev`).** The web preview only has demo data and no Tauri, so it proves nothing about the real app.
+
+When a bug only shows in the real app (stale UI, a job that never ends), look at it instead of guessing. Run `pnpm dev` with the webview's debug port open:
 
 1. Close the installed Tidra first: the dev app uses the **same database and keychain**, so it shows the user's real projects, and anything you click there really runs (git, pnpm, GitHub).
 2. Start it in the background: `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 pnpm dev` (WebView2 is Windows; the variable does nothing elsewhere). Wait until `http://127.0.0.1:9222/json` lists a `localhost:1420` page; the first Rust build takes a few minutes.
@@ -76,7 +78,8 @@ Rules:
 - **Notifications**: only news, never a backlog. Advisories notify when a high or critical one is new since the last scan (the first scan just records a baseline), one entry per project. The desktop only gets grouped messages: "You have new high security advisories" and "You have N new notifications". Only notify about fresh events (last 2 days).
 - **Registry**: npm documents of popular packages run to tens of MB. Rust downloads them compressed and trims them to the fields Tidra reads (`http_fetch` with `packument`, mirrored by `trimPackument` for tests and `pnpm web`), and only the trimmed copy is cached. A package whose installed version equals its `latest` dist-tag skips the document entirely. Answers are shared for a minute, so one pass over all projects asks once per package.
 - **Fingerprints** (`src/engine/fingerprint.ts`): `loadWorkspace` hashes every input (manifests, workspace yaml, npm config, lockfile) with SHA-256. Unchanged projects reuse the last registry answers for 2 h, security scans skip OSV for 12 h while the lockfile hash matches, Actions scans skip for 6 h while workflow files match, and parsed lockfiles are cached by hash. "Check again" on a project forces a fresh check.
-- **Background jobs at launch**: each job's last successful run is kept in `kv` (`jobLastRuns`), so a relaunch only runs what is due. At most three jobs run at once, in the priority order in `src/services/jobs.ts`. A full project refresh shares one set of git calls per checkout (`GitInfoCache`), so a monorepo's packages don't each run git; each checkout's git state waits only for its own `git fetch` (origin and upstream only), while registry work runs alongside. Background fetches are skipped when GitHub's branch heads (one ETag-cached request per remote, `remotesUnchanged`) already match `refs/remotes`: an SSH fetch spends ~2 s on the handshake alone. Sync and other user actions always fetch.
+- **Background jobs at launch**: each job's last successful run is kept in `kv` (`jobLastRuns`), so a relaunch only runs what is due. At most three jobs run at once, in the priority order in `src/services/jobs.ts`. A full project refresh shares one set of git calls per checkout (`GitInfoCache`), so a monorepo's packages don't each run git; each checkout's git state waits only for its own `git fetch` (origin and upstream only), while registry work runs alongside. Background fetches are skipped when GitHub's branch heads (one ETag-cached request per remote, `remotesUnchanged`) already match `refs/remotes`: an SSH fetch spends ~2 s on the handshake alone. Sync and other user actions always fetch. Screens with Sync buttons fetch in the background when they open and when the window regains focus, at most once a minute per checkout, so counts stay current (`useFreshGit`, `fetchProject`). Only one fetch runs per checkout; a second caller joins it (`createGit().fetch`).
+- **Git actions show at once**: a switch, sync, pull or branch delete writes the checkout's git state into its reports (`writeGitState`) and refreshes the screen before reporting success. The registry never holds one up: a full refresh follows in the background when the working tree moved (`refreshInBackground`). A newer refresh always wins; an older one finishing later doesn't write.
 - **Reads in bulk**: list screens read snapshots with `readSnapshots` (one query), and background writes call `svc.invalidate(...)`, which coalesces query invalidations so a 30-project refresh rerenders once.
 - **Error boundaries**: routes use `RouteError`; panels, chrome and table rows wrap in `ErrorBoundary` (`src/ui/error-boundary.tsx`) so one bad snapshot never blanks a screen. Unhandled promise rejections surface as one toast.
 - **Changelogs** cover only what the user watches (packages in the `watchedPackages` setting, repos in `watched_repos`). Nothing is watched automatically.
@@ -113,13 +116,14 @@ Rules:
 
 ## Testing conventions
 
-- A test that reproduces a known bug nobody fixes yet is `it.fails`, with a comment saying what's wrong; it turns red once the bug is gone, and then becomes a plain `it`.
+- A test that reproduces a known bug nobody fixes yet is `it.fails`, with a comment saying what's wrong; it turns red once the bug is gone, and then becomes a plain `it`. In Rust the same pin is `#[should_panic(expected = "...")]`.
 - CI only runs on Windows, so `#[cfg(not(windows))]` and `#[cfg(unix)]` Rust isn't compiled there. After changing such code, compile it some other way before pushing: this broke the macOS release once.
 - **Bugs are test-first.** When a bug is reported or found, first write a test that reproduces it and watch it fail, then fix the code until it passes. The test stays as the regression test.
 - **Features are code-first.** For a new feature, build it, then write tests that cover its behaviour before calling it done.
 - Tests live in `tests/`, mirroring `src/` (`tests/engine/spec.test.ts` for `src/engine/spec.ts`). No tests inside `src`.
 - `*.test.ts` → node env; `*.test.tsx` → jsdom with Testing Library.
 - Engine tests use an in-memory `Io` (`tests/support/memory-io.ts`) and real-shaped fixtures (lockfiles, manifests, registry documents).
+- Where git's own behaviour is the point (`tests/services/repos-git.test.ts`), tests run real git on throwaway repositories through `tests/support/node-io.ts`.
 - Service and UI tests use real services over in-memory SQLite (`testServices()` in `tests/support/services.ts`) instead of casting partial fakes; fixtures for outdated entries and reports live there too.
 
 ## Status
@@ -129,14 +133,15 @@ Every feature from the plan is implemented and `pnpm check` is green (~170 TS te
 Done:
 
 - Engine, core, Rust layer, sync (E2EE vault, Turso, Supabase), integrations, services, preview mode
-- All screens: Overview (dashboard: totals, needs-attention table, recent updates, releases, background checks), Projects (filters, branch switcher, grouped by repo), project page, Changelogs, Security (per package), Actions (collapsible per repo), Git, Pull requests, CI, Bot PRs (read-only list), Deploys, My packages, Toolchain, Scripts and ports, Settings (Windows 11 style panes, shortcut recorder, delete all data), onboarding
+- All screens: Overview (dashboard: totals, needs-attention table, releases, background checks), Projects (filters, branch switcher, grouped by repo), project page, Changelogs, Security (per package), Actions (collapsible per repo), Git, Pull requests, CI, Bot PRs (read-only list), Deploys, My packages, Toolchain, Scripts and ports, Settings (Windows 11 style panes, shortcut recorder, delete all data), onboarding
 - Dependency search lives in the palette (Ctrl+P by default, set in Settings): type a package to see where it is used and update it everywhere
 - Push and open a PR from Tidra (`BranchActions`); merging stays on GitHub, the app never merges
 - Updates run on the current branch unless the project turns on "Update on a new branch" (`tidra/deps-<date>`, then Open PR). They never commit, push or open a PR on their own: they stop after the checks. "Commit & Push" (menu: Commit, Push) commits everything with the latest uncommitted run's message (`commitProject`), and "Run checks" reruns the project's checks in an output dialog (update dialog and project page)
 - Actions updates commit on a `tidra/actions-<date>` branch cut from the default branch (never the current branch); each repo with outdated actions can copy a prompt for a coding agent (`actionsUpdatePrompt`)
 - Security overrides don't commit either: they record a run whose message Commit uses (`fixWithOverride`)
 - PR bodies list each package with its versions (`pullBody`), taken from the commit bodies
-- Sync (`syncRepo`, `SyncButton`): fetch origin and upstream (never `--all`, a contributor's deleted fork would fail it), fast-forward a fork's default branch to `upstream`, pull, push; never merges or rebases on its own
+- Sync (`syncRepo`, `SyncButton`): fetch origin and upstream (never `--all`, a contributor's deleted fork would fail it), fast-forward a fork's default branch to `upstream`, take origin's commits with a local `merge --ff-only` (a `git pull` would connect a second time), push, update an open PR's description; never merges or rebases on its own
+- Git page: clicking a repo opens its branches (`BranchesDialog`) with a merged icon (squash merges included), delete per branch and Delete all. Unmerged branches and Delete all confirm first. The current and default branch can't be deleted, and copies on a remote stay
 - Scripts runs any project's scripts; starting one from a project page or Toolchain opens its live output in a dialog there
 - The sidebar resumes each section where it was left (the project tab is in the URL); clicking the current section again goes to its root
 - Native feel pass, flash fixes, copy pass

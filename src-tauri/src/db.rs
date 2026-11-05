@@ -10,8 +10,26 @@ pub struct Db(pub Mutex<Connection>);
 
 pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     let conn = Connection::open(path)?;
-    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;")?;
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;
+         PRAGMA journal_size_limit = 16777216;",
+    )?;
+    // Only a smaller file is at stake, so a failure here (no disk space for the copy) must not stop the app.
+    let _ = reclaim_free_space(&conn);
     Ok(conn)
+}
+
+/// Deleted rows only become free pages, so the file never shrinks by itself.
+const MIN_FREE_BYTES: i64 = 4 * 1024 * 1024;
+
+/// Rewrites the file when at least a quarter of it is free space. The copy only holds live data, so it stays quick.
+fn reclaim_free_space(conn: &Connection) -> rusqlite::Result<()> {
+    let pragma = |name: &str| conn.query_row(&format!("PRAGMA {name}"), [], |row| row.get::<_, i64>(0));
+    let (free, total, page) = (pragma("freelist_count")?, pragma("page_count")?, pragma("page_size")?);
+    if free * page >= MIN_FREE_BYTES && free * 4 >= total {
+        conn.execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);")?;
+    }
+    Ok(())
 }
 
 fn to_sql(value: Value) -> SqlValue {
@@ -123,6 +141,25 @@ mod tests {
             let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
         }
         assert_eq!(rows, vec![vec![json!("wal")]]);
+    }
+
+    #[test]
+    fn gets_deleted_space_back_by_the_next_launch() {
+        let path = std::env::temp_dir().join(format!("tidra-db-shrink-{}.db", std::process::id()));
+        let conn = open(&path).unwrap();
+        conn.execute_batch("CREATE TABLE t (body TEXT)").unwrap();
+        let body = "x".repeat(1024 * 1024);
+        for _ in 0..8 {
+            conn.execute("INSERT INTO t VALUES (?1)", [&body]).unwrap();
+        }
+        conn.execute("DELETE FROM t", []).unwrap();
+        drop(conn);
+        drop(open(&path).unwrap());
+        let size = std::fs::metadata(&path).unwrap().len();
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+        }
+        assert!(size < 1024 * 1024, "the file keeps its deleted space: {size} bytes");
     }
 
     #[test]

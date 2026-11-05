@@ -1,7 +1,17 @@
 import { repoLabel } from "@/engine/discover";
-import { createGit, githubSlug } from "@/engine/git";
+import { createGit, githubSlug, type Git } from "@/engine/git";
+import { createLimit } from "@/engine/limit";
 import type { Services } from "./context";
-import { fetchProject, readAllReports, refreshProject, type GitInfoCache, type ProjectReport } from "./projects";
+import {
+  checkoutOf,
+  checkoutRoot,
+  fetchProject,
+  readAllReports,
+  refreshInBackground,
+  writeGitState,
+  type ProjectReport,
+} from "./projects";
+import { syncPullRequest } from "./pull-requests";
 
 export interface RepoGroup {
   /** Normalized remote, or the checkout folder for local-only repos. */
@@ -17,10 +27,10 @@ export interface RepoGroup {
 }
 
 /** Projects folded into the repos they live in: a monorepo's packages share one checkout, CI and git state. */
-export async function listRepos(svc: Services): Promise<RepoGroup[]> {
+export function groupRepos(rows: Awaited<ReturnType<typeof readAllReports>>): RepoGroup[] {
   const groups = new Map<string, RepoGroup>();
-  for (const { project, report } of await readAllReports(svc)) {
-    const root = project.path && project.subdir ? project.path.slice(0, -(project.subdir.length + 1)) : project.path;
+  for (const { project, report } of rows) {
+    const root = checkoutRoot(project);
     const key = project.remote ?? root ?? project.id;
     const slug = project.remote ? githubSlug(`https://${project.remote}`) : undefined;
     const group = groups.get(key) ?? {
@@ -32,18 +42,39 @@ export async function listRepos(svc: Services): Promise<RepoGroup[]> {
       report,
     };
     group.projects.push({ id: project.id, name: project.name, subdir: project.subdir });
+    // A package synced from another device has no folder here, so a sibling that does describes the checkout.
+    if (!group.root && root) {
+      group.root = root;
+      group.report = report ?? group.report;
+    }
     group.report ??= report;
     groups.set(key, group);
   }
   return [...groups.values()].toSorted((a, b) => a.label.localeCompare(b.label));
 }
 
-export type RepoAction = "fetch" | "pull" | "push" | "prune";
+export const listRepos = async (svc: Services) => groupRepos(await readAllReports(svc));
 
-/** Runs a git action on the repo's checkout, then refreshes every package in it. Returns a line for the toast. */
+/** Writes the checkout's new git state and has the screen showing it before the action reports success. */
+async function showGitState(svc: Services, root: string, projectIds: string[]) {
+  await writeGitState(svc, root, projectIds);
+  const keys = [...projectIds.map((id) => ["report", id]), ["reports"], ["branches"], ["branch-pull"]];
+  await Promise.all(keys.map((queryKey) => svc.queryClient.invalidateQueries({ queryKey })));
+  svc.invalidate(["home"], ["palette"]);
+}
+
+/** Sync pushes tracked branches, so it keeps an open pull request's package list current too. */
+function updatePullRequest(svc: Services, root: string, remote: string | null) {
+  void syncPullRequest(svc, root, remote).catch(() => undefined);
+}
+
+export type RepoAction = "fetch" | "pull" | "push";
+
+/** Runs a git action on the repo's checkout and shows the result. Returns a line for the toast. */
 export async function runRepoAction(svc: Services, repo: RepoGroup, action: RepoAction): Promise<string> {
   if (!repo.root) throw new Error("This repository has no folder on this device.");
   const git = createGit(svc.io, repo.root);
+  const projectIds = repo.projects.map((p) => p.id);
   let done: string;
   if (action === "fetch") {
     await git.fetch();
@@ -51,54 +82,23 @@ export async function runRepoAction(svc: Services, repo: RepoGroup, action: Repo
   } else if (action === "pull") {
     await git.pull();
     done = `Pulled ${repo.label}.`;
-  } else if (action === "push") {
+    refreshInBackground(svc, projectIds);
+  } else {
     await git.pushCurrent();
     done = `Pushed ${repo.label}.`;
-  } else {
-    const gone = (repo.report?.branches ?? []).filter((b) => b.upstreamGone && b.name !== repo.report?.git?.branch);
-    const deleted: string[] = [];
-    const kept: string[] = [];
-    for (const branch of gone) {
-      // `-d` refuses squash-merged branches; that shouldn't stop the rest from being pruned.
-      await git.run(["branch", "-d", branch.name]).then(
-        () => deleted.push(branch.name),
-        () => kept.push(branch.name),
-      );
-    }
-    done = pruneMessage(deleted, kept);
+    updatePullRequest(svc, repo.root, repo.github ? `github.com/${repo.github}` : null);
   }
-  const gitCache: GitInfoCache = new Map();
-  await Promise.all(repo.projects.map((p) => refreshProject(svc, p.id, { gitCache })));
-  await svc.queryClient.invalidateQueries({ queryKey: ["reports"] });
+  await showGitState(svc, repo.root, projectIds);
   return done;
-}
-
-function pruneMessage(deleted: string[], kept: string[]) {
-  const parts = [
-    deleted.length === 1
-      ? `Deleted ${deleted[0]}.`
-      : deleted.length > 1
-        ? `Deleted ${deleted.length} merged branches.`
-        : "",
-    kept.length > 0 ? `Kept ${kept.join(", ")}: not fully merged.` : "",
-  ].filter(Boolean);
-  return parts.join(" ") || "No merged branches to delete.";
-}
-
-async function repoOfProject(svc: Services, projectId: string): Promise<RepoGroup & { root: string }> {
-  const repo = (await listRepos(svc)).find((r) => r.projects.some((p) => p.id === projectId));
-  if (!repo?.root) throw new Error("This project has no folder on this device.");
-  return { ...repo, root: repo.root };
 }
 
 /** Local branches, then origin's branches that have no local copy yet; `git switch` creates those on demand. */
 export async function listBranches(svc: Services, projectId: string): Promise<{ name: string; remote: boolean }[]> {
-  const { root } = await repoOfProject(svc, projectId);
+  const { root } = await checkoutOf(svc, projectId);
   const git = createGit(svc.io, root);
-  const [local, remote] = await Promise.all([
-    git.run(["for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/heads"]),
-    git.run(["for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/remotes/origin"]),
-  ]);
+  const refs = (place: string) =>
+    git.run(["for-each-ref", "--sort=-committerdate", "--format=%(refname:lstrip=2)", place]);
+  const [local, remote] = await Promise.all([refs("refs/heads"), refs("refs/remotes/origin")]);
   const locals = local.split("\n").filter(Boolean);
   const have = new Set(locals);
   const remotes = remote
@@ -108,6 +108,84 @@ export async function listBranches(svc: Services, projectId: string): Promise<{ 
   return [...locals.map((name) => ({ name, remote: false })), ...remotes.map((name) => ({ name, remote: true }))];
 }
 
+export interface BranchDetail {
+  name: string;
+  lastCommit: Date;
+  current: boolean;
+  /** The branch work merges into; deleting it isn't offered. */
+  isDefault: boolean;
+  merged: boolean;
+  upstreamGone: boolean;
+  ahead: number;
+}
+
+/** The ref merged branches went into: upstream's default branch for a fork, else origin's. */
+async function mergeBase(git: Git): Promise<string | undefined> {
+  const fork = await git.fork().catch(() => undefined);
+  const name = await git.defaultBranch();
+  const candidates = [fork?.ref, name && `origin/${name}`, "origin/main", "origin/master", "main", "master"];
+  for (const ref of candidates) {
+    if (ref && (await git.raw(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`])).code === 0) return ref;
+  }
+  return undefined;
+}
+
+/** Every local branch and whether it was merged, squash merges included. Newest first, the current branch on top. */
+export async function listBranchDetails(
+  svc: Services,
+  projectId: string,
+): Promise<{ base?: string; branches: BranchDetail[] }> {
+  const { root } = await checkoutOf(svc, projectId);
+  const git = createGit(svc.io, root);
+  const [status, branches, base] = await Promise.all([git.status(), git.branches(), mergeBase(git)]);
+  const defaultName = base?.replace(/^(origin|upstream)\//, "");
+  const merged = new Set(base ? await git.mergedInto(base) : []);
+  const limit = createLimit(4);
+  const details = await Promise.all(
+    branches.map((branch) =>
+      limit(async (): Promise<BranchDetail> => {
+        const isMerged = merged.has(branch.name) || (base ? await git.squashMerged(base, branch.name) : false);
+        return {
+          ...branch,
+          current: branch.name === status.branch,
+          isDefault: branch.name === defaultName,
+          merged: isMerged,
+        };
+      }),
+    ),
+  );
+  return {
+    base,
+    branches: details.toSorted(
+      (a, b) => Number(b.current) - Number(a.current) || b.lastCommit.valueOf() - a.lastCommit.valueOf(),
+    ),
+  };
+}
+
+const firstLine = (error: unknown) => (error instanceof Error ? error.message : String(error)).split("\n")[0];
+
+/**
+ * Deletes local branches, merged or not: asking first about unmerged ones is the caller's job. The checked-out branch
+ * is never touched, and copies on a remote stay. Returns a line for the toast.
+ */
+export async function deleteBranches(svc: Services, projectId: string, names: string[]): Promise<string> {
+  const { root, projectIds } = await checkoutOf(svc, projectId);
+  const git = createGit(svc.io, root);
+  const { branch: current } = await git.status();
+  const deleted: string[] = [];
+  const failed: string[] = [];
+  for (const name of names.filter((n) => n !== current)) {
+    await git.deleteBranch(name).then(
+      () => deleted.push(name),
+      (error: unknown) => failed.push(`${name}: ${firstLine(error)}`),
+    );
+  }
+  await showGitState(svc, root, projectIds);
+  if (deleted.length === 0 && failed.length > 0) throw new Error(`Couldn't delete ${failed.join("; ")}`);
+  const done = deleted.length === 1 ? `Deleted ${deleted[0]}.` : `Deleted ${deleted.length} branches.`;
+  return failed.length > 0 ? `${done} Kept ${failed.join("; ")}` : done;
+}
+
 /** Switches the repo's checkout (every package in it) to `branch`, creating it from HEAD when asked. */
 export async function switchBranch(
   svc: Services,
@@ -115,55 +193,56 @@ export async function switchBranch(
   branch: string,
   options: { create?: boolean } = {},
 ): Promise<void> {
-  const repo = await repoOfProject(svc, projectId);
-  const git = createGit(svc.io, repo.root);
+  const { root, projectIds } = await checkoutOf(svc, projectId);
+  const git = createGit(svc.io, root);
   await (options.create ? git.switchCreate(branch) : git.switchTo(branch));
-  const gitCache: GitInfoCache = new Map();
-  await Promise.all(repo.projects.map((p) => refreshProject(svc, p.id, { gitCache })));
-  svc.invalidate(["branch-pull"], ["branches"]);
-  // The switch shows at once; the fetch then fills in what the new branch is missing from its remote.
-  void fetchProject(svc, projectId, { force: true })
-    .then(() => svc.invalidate(["branch-pull"]))
-    .catch(() => undefined);
+  // The switch shows at once. Another branch's lockfile can take the registry seconds, and the fetch fills in what
+  // this branch is missing from its remote; neither holds anything up.
+  await showGitState(svc, root, projectIds);
+  refreshInBackground(svc, projectIds);
+  void fetchProject(svc, projectId, { force: true }).catch(() => undefined);
 }
 
 /**
  * One-click sync of the checkout, like an editor's Sync button: fetch origin and upstream, fast-forward a fork's default
- * branch to `upstream`, pull what origin has, then push what it lacks. Never merges or rebases on its own; a
+ * branch to `upstream`, take what origin has, then push what it lacks. Never merges or rebases on its own; a
  * diverged branch stops with git's message. Returns a line for the toast.
  */
 export async function syncRepo(svc: Services, projectId: string): Promise<string> {
-  const repo = await repoOfProject(svc, projectId);
-  const git = createGit(svc.io, repo.root);
+  const { root, label, remote, projectIds } = await checkoutOf(svc, projectId);
+  const git = createGit(svc.io, root);
   await git.fetch();
   const before = await git.status();
   if (!before.branch) throw new Error("HEAD is detached. Switch to a branch first.");
 
   const steps: string[] = [];
+  let moved = false;
   const fork = await git.fork().catch(() => undefined);
-  const base = fork?.ref?.replace(/^upstream\//, "");
-  if (fork?.ref && base === before.branch) {
-    const behind = Number(await git.run(["rev-list", "--count", `HEAD..${fork.ref}`]));
-    if (behind > 0) {
-      await git.run(["merge", "--ff-only", fork.ref]);
-      steps.push(`took ${behind} from upstream`);
-    }
+  if (fork?.ref && fork.ref.replace(/^upstream\//, "") === before.branch && fork.behind) {
+    await git.run(["merge", "--ff-only", fork.ref]);
+    steps.push(`took ${fork.behind} from upstream`);
+    moved = true;
   }
-  if (before.upstream && before.behind > 0) {
-    await git.pull();
-    steps.push(`pulled ${before.behind}`);
+  const behind = moved ? (await git.status()).behind : before.behind;
+  if (before.upstream && behind > 0) {
+    await git.fastForward();
+    steps.push(`pulled ${behind}`);
+    moved = true;
   }
   const after = await git.status();
+  let pushed = true;
   if (!after.upstream) {
     await git.push(after.branch ?? before.branch);
     steps.push("published the branch");
   } else if (after.ahead > 0) {
     await git.pushCurrent();
     steps.push(`pushed ${after.ahead}`);
+  } else {
+    pushed = false;
   }
 
-  const gitCache: GitInfoCache = new Map();
-  await Promise.all(repo.projects.map((p) => refreshProject(svc, p.id, { gitCache })));
-  svc.invalidate(["branch-pull"], ["branches"]);
-  return steps.length > 0 ? `Synced ${repo.label}: ${steps.join(", ")}.` : `${repo.label} is in sync.`;
+  await showGitState(svc, root, projectIds);
+  if (moved) refreshInBackground(svc, projectIds);
+  if (pushed) updatePullRequest(svc, root, remote);
+  return steps.length > 0 ? `Synced ${label}: ${steps.join(", ")}.` : `${label} is in sync.`;
 }

@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { dismissals, runs } from "@/core/db/schema";
+import { describe, expect, it, vi } from "vitest";
+import { dismissals } from "@/core/db/schema";
 import type { Finding } from "@/engine/advisories";
 import type { WorkflowRun } from "@/integrations/github";
 import type { CiSnapshot } from "@/services/github-feed";
@@ -159,27 +159,6 @@ describe("homeSummary", () => {
     close();
     expect(summary.deploys.failing).toEqual([]);
   });
-
-  it("lists recent update runs with their project, even after the project was removed", async () => {
-    const { svc, close } = await setup();
-    await svc.store.db.insert(runs).values([
-      { id: "r1", projectId: "a", kind: "update", title: "Update react", startedAt: "2026-11-01T00:00:00Z", ok: true },
-      {
-        id: "r2",
-        projectId: "gone",
-        kind: "update",
-        title: "Update zod",
-        startedAt: "2026-11-02T00:00:00Z",
-        ok: false,
-      },
-    ]);
-    const summary = await homeSummary(svc);
-    close();
-    expect(summary.runs.map((r) => [r.id, r.project])).toEqual([
-      ["r2", "Removed project"],
-      ["r1", "app"],
-    ]);
-  });
 });
 
 describe("needsAttention", () => {
@@ -201,7 +180,6 @@ describe("needsAttention", () => {
     actions: { outdated: 0, repos: 0 },
     git: { dirty: 0, unpushed: 0, behind: 0 },
     health: [],
-    runs: [],
     releases: [],
     ...extra,
   });
@@ -213,5 +191,17 @@ describe("needsAttention", () => {
     expect(
       needsAttention(summary({ ci: { failing: [{ name: "a", repo: "o/a", url: "u", title: "t" }], repos: [] } })),
     ).toBe(true);
+  });
+});
+
+describe("what homeSummary reads", () => {
+  it("reads each project's report once", async () => {
+    const { svc, close } = await testServices();
+    await svc.store.addProject({ id: "p1", name: "app", remote: null, path: "/app" });
+    await writeSnapshot(svc, reportKey("p1"), projectReport([]));
+    const query = vi.spyOn(svc.driver, "query");
+    await homeSummary(svc);
+    close();
+    expect(query.mock.calls.filter(([, params]) => JSON.stringify(params).includes("report:p1"))).toHaveLength(1);
   });
 });

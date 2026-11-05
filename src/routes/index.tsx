@@ -5,9 +5,9 @@ import {
   ArrowDown,
   ArrowUp,
   CircleCheck,
-  CircleX,
   FolderGit2,
   GitPullRequest,
+  Pencil,
   Play,
   RefreshCw,
   ShieldAlert,
@@ -26,7 +26,6 @@ import { ErrorBoundary } from "@/ui/error-boundary";
 import { openExternal } from "@/ui/external";
 import { Page } from "@/ui/layout";
 import { Legend, SegmentBar, type Segment } from "@/ui/meter";
-import { Spinner } from "@/ui/spinner";
 import { TimeAgo } from "@/ui/time";
 import { toastError } from "@/ui/toast";
 
@@ -93,9 +92,6 @@ function Dashboard({ home }: { home: HomeSummary }) {
           <AttentionTable health={home.health} total={home.projects} />
         </ErrorBoundary>
         <div className="flex flex-col gap-5">
-          <ErrorBoundary>
-            <RecentRuns runs={home.runs} />
-          </ErrorBoundary>
           <ErrorBoundary>
             <Releases releases={home.releases} />
           </ErrorBoundary>
@@ -357,7 +353,12 @@ function GitCell({ health }: { health: ProjectHealth }) {
   return (
     <span className="flex min-w-0 items-center gap-2 text-xs text-muted">
       <span className="truncate font-mono">{health.branch}</span>
-      {health.changed > 0 ? <span className="shrink-0 text-warn">{health.changed}✎</span> : null}
+      {health.changed > 0 ? (
+        <span className="flex shrink-0 items-center gap-0.5 text-warn">
+          {health.changed}
+          <Pencil className="size-3" strokeWidth={1.5} />
+        </span>
+      ) : null}
       {health.ahead > 0 ? (
         <span className="flex shrink-0 items-center text-info">
           <ArrowUp className="size-3" />
@@ -371,39 +372,6 @@ function GitCell({ health }: { health: ProjectHealth }) {
         </span>
       ) : null}
     </span>
-  );
-}
-
-function RecentRuns({ runs }: { runs: HomeSummary["runs"] }) {
-  return (
-    <Panel title="Recent updates">
-      {runs.length === 0 ? (
-        <p className="px-4 py-4 text-sm text-muted">Updates you run show up here</p>
-      ) : (
-        runs.slice(0, 5).map((run) => (
-          <Link
-            key={run.id}
-            {...projectLink(run.projectId)}
-            className="flex h-11 items-center gap-2.5 border-b border-line px-4 last:border-b-0 hover:bg-hover"
-          >
-            {run.ok === null ? (
-              <Spinner className="size-3.5" />
-            ) : run.ok ? (
-              <CircleCheck className="size-4 shrink-0 text-ok" />
-            ) : (
-              <CircleX className="size-4 shrink-0 text-bad" />
-            )}
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-sm">{run.project}</span>
-              <span className="truncate text-xs text-faint">{run.title}</span>
-            </span>
-            <span className="shrink-0 text-xs">
-              <TimeAgo value={run.startedAt} />
-            </span>
-          </Link>
-        ))
-      )}
-    </Panel>
   );
 }
 

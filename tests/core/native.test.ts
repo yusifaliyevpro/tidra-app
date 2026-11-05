@@ -116,6 +116,21 @@ describe("native io", () => {
     );
   });
 
+  it("doesn't keep the whole output of a long-running streamed process", async () => {
+    const chunk = "x".repeat(1024 * 1024);
+    tauri.invoke.mockImplementation(async (command) => {
+      if (command !== "proc_spawn") return undefined;
+      queueMicrotask(() => {
+        const channel = tauri.channels[0];
+        for (let i = 0; i < 20; i++) channel?.onmessage?.({ kind: "stdout", data: chunk });
+        channel?.onmessage?.({ kind: "exit", code: 0 });
+      });
+      return 8;
+    });
+    const result = await io.run("pnpm", ["dev"], { onOutput: () => undefined });
+    expect(result.stdout.length).toBeLessThan(10 * chunk.length);
+  });
+
   it("reports a program that can't start as exit code null with the reason", async () => {
     tauri.invoke.mockRejectedValue(new Error("`pnpm` was not found on PATH"));
     expect(await io.run("pnpm", ["-v"])).toEqual({ code: null, stdout: "", stderr: "`pnpm` was not found on PATH" });
