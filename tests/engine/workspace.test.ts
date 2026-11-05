@@ -156,3 +156,152 @@ describe("workspace fingerprint", () => {
     expect(manifest.lockfileHash).toBe(base.lockfileHash);
   });
 });
+
+describe("detectPackageManager edge cases", () => {
+  it("reads the version from packageManager, dropping the integrity hash", async () => {
+    const io = memoryIo({});
+    expect(await detectPackageManager(io, "/r", { packageManager: "pnpm@12.17.0+sha512.abc" })).toMatchObject({
+      name: "pnpm",
+      version: "12.17.0",
+    });
+  });
+
+  it("ignores packageManager values that aren't a known manager", async () => {
+    const io = memoryIo({ "/r/yarn.lock": "" });
+    expect((await detectPackageManager(io, "/r", { packageManager: "deno@2.0.0" })).name).toBe("yarn");
+  });
+
+  it("only takes the declared manager's lockfile", async () => {
+    const io = memoryIo({ "/r/package-lock.json": "{}", "/r/pnpm-lock.yaml": "" });
+    expect(await detectPackageManager(io, "/r", { packageManager: "npm@11.0.0" })).toMatchObject({
+      name: "npm",
+      lockfile: "/r/package-lock.json",
+    });
+  });
+
+  it("knows bun's binary lockfile, which has no parser", async () => {
+    const io = memoryIo({ "/r/bun.lockb": "" });
+    expect(await detectPackageManager(io, "/r", {})).toMatchObject({ name: "bun", lockfile: "/r/bun.lockb" });
+  });
+
+  it("treats pnpm-workspace.yaml as pnpm even before a lockfile exists", async () => {
+    const io = memoryIo({ "/r/pnpm-workspace.yaml": "packages: []" });
+    expect(await detectPackageManager(io, "/r", {})).toEqual({ name: "pnpm", version: undefined, yarnBerry: false });
+  });
+});
+
+describe("expandWorkspaceGlobs edge cases", () => {
+  it("matches exact folders and returns them sorted", async () => {
+    const io = memoryIo({ "/r/b/package.json": "{}", "/r/a/package.json": "{}" });
+    expect(await expandWorkspaceGlobs(io, "/r", ["b", "a"])).toEqual(["a", "b"]);
+  });
+
+  it("skips hidden folders", async () => {
+    const io = memoryIo({ "/r/.cache/x/package.json": "{}", "/r/apps/x/package.json": "{}" });
+    expect(await expandWorkspaceGlobs(io, "/r", ["*/*"])).toEqual(["apps/x"]);
+  });
+
+  it("matches every depth for a bare `**`", async () => {
+    const io = memoryIo({ "/r/apps/x/package.json": "{}", "/r/tools/package.json": "{}" });
+    expect(await expandWorkspaceGlobs(io, "/r", ["**"])).toEqual(["apps/x", "tools"]);
+  });
+
+  it("only reads folders a pattern can match", async () => {
+    const files: Record<string, string> = { "/r/apps/web/package.json": "{}", "/r/apps/api/package.json": "{}" };
+    for (const dir of ["ios/Pods/A/B/C/D", "ios/Pods/E/F/G", "dist/x/y", "docs/a/b/c"]) files[`/r/${dir}/f.txt`] = "";
+    const io = memoryIo(files);
+    let reads = 0;
+    const counting = { ...io, readDir: async (path: string) => (reads++, io.readDir(path)) };
+    expect(await expandWorkspaceGlobs(counting, "/r", ["apps/**"])).toEqual(["apps/api", "apps/web"]);
+    expect(reads).toBeLessThanOrEqual(4);
+  });
+});
+
+describe("loadWorkspace edge cases", () => {
+  it("reads the object form of npm workspaces", async () => {
+    const io = memoryIo({
+      "/r/package.json": pkg({ workspaces: { packages: ["packages/*"] } }),
+      "/r/packages/a/package.json": pkg({ name: "a" }),
+    });
+    expect((await loadWorkspace(io, "/r")).importers.map((i) => i.path)).toEqual([".", "packages/a"]);
+  });
+
+  it("skips members whose package.json can't be read", async () => {
+    const io = memoryIo({
+      "/r/package.json": pkg({ workspaces: ["packages/*"] }),
+      "/r/packages/ok/package.json": pkg({ name: "ok" }),
+      "/r/packages/broken/package.json": "{ not json",
+    });
+    expect((await loadWorkspace(io, "/r")).importers.map((i) => i.path)).toEqual([".", "packages/ok"]);
+  });
+
+  it("rejects a root manifest whose dependencies aren't strings", async () => {
+    const io = memoryIo({ "/r/package.json": pkg({ dependencies: { a: 1 } }) });
+    await expect(loadWorkspace(io, "/r")).rejects.toThrow("No readable package.json");
+  });
+
+  it("takes release age and save-exact from .npmrc when the workspace file has none", async () => {
+    const io = memoryIo({
+      "/r/package.json": pkg({ name: "r" }),
+      "/r/.npmrc": "minimum-release-age=60\nsave-exact=true\n",
+    });
+    const ws = await loadWorkspace(io, "/r");
+    expect(ws.minimumReleaseAgeMinutes).toBe(60);
+    expect(ws.saveExact).toBe(true);
+  });
+
+  it("layers the user's .npmrc under the project's", async () => {
+    const io = memoryIo(
+      {
+        "/r/package.json": pkg({ name: "r" }),
+        "/home/test/.npmrc": "registry=https://user.dev\n@acme:registry=https://acme.dev\n",
+        "/r/.npmrc": "registry=https://project.dev\n",
+      },
+      { homeDir: "/home/test" },
+    );
+    const { npm } = await loadWorkspace(io, "/r");
+    expect(npm.registry).toBe("https://project.dev/");
+    expect(npm.scopes["@acme"]).toBe("https://acme.dev/");
+  });
+
+  it("ignores a release age that isn't a positive number and a broken workspace file", async () => {
+    const io = memoryIo({
+      "/r/package.json": pkg({ name: "r" }),
+      "/r/pnpm-workspace.yaml": "minimumReleaseAge: soon\n",
+    });
+    expect((await loadWorkspace(io, "/r")).minimumReleaseAgeMinutes).toBe(0);
+    const broken = memoryIo({ "/r/package.json": pkg({ name: "r" }), "/r/pnpm-workspace.yaml": "packages: [" });
+    expect((await loadWorkspace(broken, "/r")).catalogs).toEqual({});
+  });
+
+  it("keeps working with a corrupt lockfile, just without installed versions", async () => {
+    const io = memoryIo({ "/r/package.json": pkg({ name: "r" }), "/r/package-lock.json": "{ broken" });
+    const ws = await loadWorkspace(io, "/r");
+    expect(ws.lockfile.installed(".", "a")).toBeUndefined();
+    expect(ws.lockfileHash).not.toBe("");
+  });
+
+  it("reads a package.json that starts with a byte-order mark", async () => {
+    const io = memoryIo({ "/r/package.json": '﻿{ "name": "app" }' });
+    expect((await loadWorkspace(io, "/r")).importers[0]?.manifest.name).toBe("app");
+  });
+});
+
+describe("expandWorkspaceGlobs reads", () => {
+  it("doesn't read inside folders no pattern can reach", async () => {
+    const io = memoryIo({
+      "/r/apps/web/package.json": "{}",
+      "/r/apps/web/src/deep/f.txt": "",
+      "/r/dist/x/y/f.txt": "",
+    });
+    const read: string[] = [];
+    const counting = { ...io, readDir: async (path: string) => (read.push(path), io.readDir(path)) };
+    expect(await expandWorkspaceGlobs(counting, "/r", ["apps/*"])).toEqual(["apps/web"]);
+    expect(read.toSorted()).toEqual(["/r", "/r/apps"]);
+  });
+
+  it("still finds nested ** matches in the middle of a pattern", async () => {
+    const io = memoryIo({ "/r/libs/a/b/pkg/package.json": "{}", "/r/libs/skip/package.json": "{}" });
+    expect(await expandWorkspaceGlobs(io, "/r", ["libs/**/pkg"])).toEqual(["libs/a/b/pkg"]);
+  });
+});

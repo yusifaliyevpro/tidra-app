@@ -65,7 +65,7 @@ export async function addProject(svc: Services, path: string): Promise<string> {
   }
   let name = basename(path);
   try {
-    const parsed: unknown = JSON.parse(manifest);
+    const parsed: unknown = JSON.parse(manifest.replace(/^\uFEFF/, ""));
     if (typeof parsed === "object" && parsed !== null && "name" in parsed && typeof parsed.name === "string") {
       name = parsed.name;
     }

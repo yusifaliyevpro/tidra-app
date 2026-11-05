@@ -128,6 +128,7 @@ export async function detectPackageManager(io: Io, root: string, manifest: Manif
 }
 
 function globToRegExp(glob: string): RegExp {
+  if (normalize(glob) === "**") return /^.*$/;
   const pattern = normalize(glob)
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
     .replace(/\/\*\*$/, "\u0001")
@@ -138,9 +139,22 @@ function globToRegExp(glob: string): RegExp {
   return new RegExp(`^${pattern}/?$`);
 }
 
-/** Expands workspace globs by walking only as deep as the patterns need, skipping node_modules. */
+/** Whether a pattern could still match something inside `dir`; `**` matches anything from there on. */
+function canMatchInside(globSegments: string[], dir: string[]): boolean {
+  for (const [index, segment] of dir.entries()) {
+    const part = globSegments[index];
+    if (part === undefined) return false;
+    if (part === "**") return true;
+    if (!globToRegExp(part).test(segment)) return false;
+  }
+  return globSegments.length > dir.length;
+}
+
+/** Expands workspace globs, reading only folders a pattern can match, so ios/Pods or dist are never walked. */
 export async function expandWorkspaceGlobs(io: Io, root: string, globs: string[]): Promise<string[]> {
-  const include = globs.filter((g) => !g.startsWith("!")).map(globToRegExp);
+  const includeGlobs = globs.filter((g) => !g.startsWith("!"));
+  const include = includeGlobs.map(globToRegExp);
+  const segments = includeGlobs.map((g) => normalize(g).split("/"));
   const exclude = globs.filter((g) => g.startsWith("!")).map((g) => globToRegExp(g.slice(1)));
   const deep = globs.some((g) => g.includes("**"));
   const maxDepth = deep ? 6 : Math.max(1, ...globs.map((g) => normalize(g.replace(/^!/, "")).split("/").length));
@@ -156,7 +170,7 @@ export async function expandWorkspaceGlobs(io: Io, root: string, globs: string[]
         const child = rel === "." ? entry.name : `${rel}/${entry.name}`;
         const matches = include.some((r) => r.test(child)) && !exclude.some((r) => r.test(child));
         if (matches && (await io.exists(join(root, child, "package.json")))) results.push(child);
-        await walk(child, depth + 1);
+        if (segments.some((s) => canMatchInside(s, child.split("/")))) await walk(child, depth + 1);
       }),
     );
   };
@@ -168,7 +182,8 @@ async function readManifest(io: Io, path: string): Promise<{ value: Manifest; te
   const text = await io.readText(path);
   if (text === null) return undefined;
   try {
-    const value: unknown = JSON.parse(text);
+    // Some Windows editors save a byte-order mark; npm and Node accept it, JSON.parse doesn't.
+    const value: unknown = JSON.parse(text.replace(/^\uFEFF/, ""));
     return z.validate(ManifestSchema, value) ? { value, text } : undefined;
   } catch {
     return undefined;

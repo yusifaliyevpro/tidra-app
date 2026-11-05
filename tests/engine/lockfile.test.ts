@@ -157,3 +157,44 @@ describe("parseBunLock", () => {
     expect(lock.packages).toHaveLength(3);
   });
 });
+
+describe("lockfile edge cases", () => {
+  it("returns nothing for unknown importers and packages", () => {
+    const lock = parsePnpmLock(PNPM);
+    expect(lock.installed("apps/missing", "react")).toBeUndefined();
+    expect(lock.installed(".", "not-installed")).toBeUndefined();
+  });
+
+  it("reads pnpm lockfiles from older pnpm that list packages without snapshots", () => {
+    const lock = parsePnpmLock(
+      "lockfileVersion: '6.0'\nimporters:\n  .:\n    dependencies:\n      react:\n        specifier: ^18.0.0\n        version: 18.2.0\npackages:\n  /react@18.2.0:\n    resolution: {integrity: sha512-a}\n",
+    );
+    expect(lock.installed(".", "react")).toBe("18.2.0");
+    expect(lock.packages).toEqual([{ name: "react", version: "18.2.0", dev: false }]);
+  });
+
+  it("tolerates an empty pnpm lockfile", () => {
+    expect(parsePnpmLock("").packages).toEqual([]);
+  });
+
+  it("throws on a corrupt npm lockfile, which the workspace loader turns into no lockfile", () => {
+    expect(() => parseNpmLock("{ not json")).toThrow(SyntaxError);
+  });
+
+  it("reads yarn entries only for the spec the manifest uses", () => {
+    const lock = parseYarnLock(
+      'react@^18.0.0, react@^18.2.0:\n  version "18.2.0"\n\nreact@^17.0.0:\n  version "17.0.2"\n',
+    );
+    expect(lock.installed(".", "react", "^17.0.0")).toBe("17.0.2");
+    expect(lock.installed(".", "react", "^18.0.0")).toBe("18.2.0");
+    expect(lock.installed(".", "react")).toBeUndefined();
+  });
+
+  it("skips bun workspace packages", () => {
+    const lock = parseBunLock(
+      '{ "packages": { "ui": ["ui@workspace:packages/ui"], "zod": ["zod@4.0.0", "", {}, "sha"] } }',
+    );
+    expect(lock.packages.map((p) => p.name)).toEqual(["zod"]);
+    expect(lock.installed(".", "ui")).toBeUndefined();
+  });
+});

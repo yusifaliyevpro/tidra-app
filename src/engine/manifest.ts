@@ -36,6 +36,10 @@ export interface CatalogEdit {
   value: string;
 }
 
+/** The YAML writer always emits LF; a CRLF file must stay CRLF or every line shows up in the diff. */
+const withLineEndingsOf = (original: string, text: string) =>
+  original.includes("\r\n") ? text.replaceAll(/\r?\n/g, "\r\n") : text;
+
 /** Edits `catalog:`/`catalogs:` entries through the YAML document model so comments and quoting survive. */
 export function editCatalogs(yamlText: string, edits: CatalogEdit[]): string {
   const doc = parseDocument(yamlText);
@@ -45,7 +49,7 @@ export function editCatalogs(yamlText: string, edits: CatalogEdit[]): string {
     const path = edit.catalog === "default" && !doc.hasIn([...named, edit.name]) ? ["catalog"] : named;
     doc.setIn([...path, edit.name], edit.value);
   }
-  return doc.toString({ lineWidth: 0 });
+  return withLineEndingsOf(yamlText, doc.toString({ lineWidth: 0 }));
 }
 
 export type OverrideEdit = { name: string; value: string };
@@ -54,14 +58,18 @@ export type OverrideEdit = { name: string; value: string };
 export function editYamlOverrides(yamlText: string, edits: OverrideEdit[]): string {
   const doc = parseDocument(yamlText);
   for (const edit of edits) doc.setIn(["overrides", edit.name], edit.value);
-  return doc.toString({ lineWidth: 0 });
+  return withLineEndingsOf(yamlText, doc.toString({ lineWidth: 0 }));
 }
 
-export function editJsonOverrides(text: string, field: "overrides" | "resolutions", edits: OverrideEdit[]): string {
+export function editJsonOverrides(
+  text: string,
+  field: "overrides" | "resolutions" | "pnpm.overrides",
+  edits: OverrideEdit[],
+): string {
   const formattingOptions = detectFormatting(text);
   let next = text;
   for (const edit of edits) {
-    next = applyEdits(next, modify(next, [field, edit.name], edit.value, { formattingOptions }));
+    next = applyEdits(next, modify(next, [...field.split("."), edit.name], edit.value, { formattingOptions }));
   }
   return next;
 }

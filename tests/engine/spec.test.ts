@@ -68,3 +68,87 @@ describe("formatSpec", () => {
     expect(formatSpec("workspace:*", "2.0.0", false)).toBe("workspace:*");
   });
 });
+
+describe("parseSpec edge cases", () => {
+  it("trims whitespace around the value", () => {
+    expect(parseSpec("a", "  ^1.2.0  ")).toMatchObject({ kind: "range", range: "^1.2.0", style: "caret" });
+  });
+
+  it("reads x-ranges, hyphen ranges and unions as complex ranges", () => {
+    for (const range of ["1.x", "1.2.3 - 2.3.4", "^1.2.3 || ^2.0.0", ">=1.0.0 <2.0.0"]) {
+      expect(parseSpec("a", range)).toMatchObject({ kind: "range", range, style: "complex" });
+    }
+  });
+
+  it("treats npm aliases without a version as the latest tag", () => {
+    expect(parseSpec("a", "npm:pkg")).toEqual({ kind: "tag", name: "pkg", tag: "latest", alias: true });
+    expect(parseSpec("a", "npm:@scope/pkg")).toEqual({ kind: "tag", name: "@scope/pkg", tag: "latest", alias: true });
+  });
+
+  it("reads aliases to a dist-tag", () => {
+    expect(parseSpec("a", "npm:react@canary")).toEqual({ kind: "tag", name: "react", tag: "canary", alias: true });
+  });
+
+  it("treats owner/repo shorthands and other git hosts as git", () => {
+    for (const value of ["owner/repo", "gitlab:o/r", "bitbucket:o/r", "git://github.com/o/r.git", "o/r#v1.2.3"]) {
+      expect(parseSpec("a", value).kind).toBe("git");
+    }
+  });
+
+  it("reads portal: like link:", () => {
+    expect(parseSpec("a", "portal:../a")).toEqual({ kind: "link", target: "portal:../a" });
+  });
+
+  it("keeps the target of file: and url specs", () => {
+    expect(parseSpec("a", "file:../a.tgz")).toEqual({ kind: "file", target: "../a.tgz" });
+    expect(parseSpec("a", "http://x.dev/a.tgz")).toEqual({ kind: "url", target: "http://x.dev/a.tgz" });
+  });
+
+  it("reads workspace protocol shorthands", () => {
+    expect(parseSpec("a", "workspace:*")).toEqual({ kind: "workspace", range: "*" });
+    expect(parseSpec("a", "workspace:^")).toEqual({ kind: "workspace", range: "^" });
+  });
+});
+
+describe("rangeStyle edge cases", () => {
+  it.for([
+    ["1.2.3", "exact"],
+    ["1.2.3+build.5", "exact"],
+    ["^1", "caret"],
+    ["^1.2", "caret"],
+    ["~1", "tilde"],
+    ["~1.2.3-beta.1", "tilde"],
+    ["^1.2.3-beta.1+build", "complex"],
+    [">=1.2.3", "complex"],
+    ["*", "complex"],
+  ])("%s is %s", ([range, style]) => {
+    expect(rangeStyle(range ?? "")).toBe(style);
+  });
+});
+
+describe("formatSpec edge cases", () => {
+  it("drops a leading v from exact pins", () => {
+    expect(formatSpec("v1.2.3", "1.3.0", false)).toBe("1.3.0");
+  });
+
+  it("keeps the alias when the alias has no version", () => {
+    expect(formatSpec("npm:pkg", "2.0.0", false)).toBe("npm:pkg@^2.0.0");
+  });
+
+  it("writes exact versions inside aliases when the project saves exact", () => {
+    expect(formatSpec("npm:react@^18.0.0", "18.3.1", true)).toBe("npm:react@18.3.1");
+  });
+
+  it("keeps workspace protocols even when saving exact", () => {
+    expect(formatSpec("workspace:^1.0.0", "2.0.0", true)).toBe("workspace:^1.0.0");
+  });
+
+  it("writes partial tildes and carets in full", () => {
+    expect(formatSpec("~1", "1.5.0", false)).toBe("~1.5.0");
+    expect(formatSpec("^1.x", "2.0.0", false)).toBe("^2.0.0");
+  });
+
+  it("keeps an `=` pin exact", () => {
+    expect(formatSpec("=1.2.3", "1.3.0", false)).toBe("1.3.0");
+  });
+});

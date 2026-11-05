@@ -38,7 +38,7 @@ function withName(name: string, value: string, alias: boolean): DependencySpec {
 }
 
 export function rangeStyle(range: string): RangeStyle {
-  if (semver.valid(range)) return "exact";
+  if (semver.valid(range.replace(/^=\s*/, ""))) return "exact";
   if (/^\^\d+(\.\d+){0,2}(-[\w.]+)?$/.test(range)) return "caret";
   if (/^~\d+(\.\d+){0,2}(-[\w.]+)?$/.test(range)) return "tilde";
   return "complex";
