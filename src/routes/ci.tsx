@@ -5,7 +5,7 @@ import { Activity, ChevronRight, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import { useCi } from "@/app/queries";
 import { useServices } from "@/app/services";
-import type { WorkflowRun } from "@/integrations/github";
+import { runFailed, type WorkflowRun } from "@/integrations/github";
 import { JobRefresh } from "@/modules/common";
 import { failedLog, refreshCi } from "@/services/github-feed";
 import { Badge } from "@/ui/badge";
@@ -24,7 +24,8 @@ export const Route = createFileRoute("/ci")({ component: Ci });
 function runTone(run: WorkflowRun): { tone: Tone; label: string } {
   if (run.status !== "completed") return { tone: "warn", label: run.status ?? "queued" };
   if (run.conclusion === "success") return { tone: "ok", label: "passed" };
-  if (run.conclusion === "failure") return { tone: "bad", label: "failed" };
+  if (runFailed(run))
+    return { tone: "bad", label: run.conclusion === "failure" ? "failed" : (run.conclusion ?? "failed") };
   return { tone: "neutral", label: run.conclusion ?? "done" };
 }
 
@@ -77,7 +78,7 @@ const latestOf = (entry: Entry) => entry.runs.find((r) => r.head_branch === entr
 /** Failing first, then running, then the rest. */
 function rank(entry: Entry) {
   const run = latestOf(entry);
-  if (entry.error || run?.conclusion === "failure") return 0;
+  if (entry.error || (run && runFailed(run))) return 0;
   if (run && run.status !== "completed") return 1;
   return run ? 2 : 3;
 }
@@ -144,7 +145,7 @@ function RepoRuns({
                 <span className="w-20 text-right text-xs">
                   <TimeAgo value={run.created_at} />
                 </span>
-                {run.conclusion === "failure" ? (
+                {runFailed(run) ? (
                   <>
                     <Button size="sm" onClick={() => onLog(run)}>
                       Log

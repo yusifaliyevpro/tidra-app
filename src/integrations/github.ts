@@ -125,6 +125,13 @@ const BranchPulls = z.compile(
 );
 const PullSearch = z.compile(z.looseObject({ nodes: z.array(z.union([PullSchema, z.looseObject({})])) }));
 
+export const RELEASES_PER_PAGE = 50;
+
+const FAILED_CONCLUSIONS = new Set(["failure", "timed_out", "startup_failure"]);
+
+/** Cancelled, skipped and neutral runs aren't failures; a run that timed out or couldn't start is. */
+export const runFailed = (run: { conclusion?: string | null }) => FAILED_CONCLUSIONS.has(run.conclusion ?? "");
+
 export type CheckState = "success" | "failure" | "pending" | "none";
 
 export function checkState(pull: PullRequest): CheckState {
@@ -235,8 +242,13 @@ export function createGitHub(options: {
     request,
     graphql,
 
-    releases: async (owner: string, repo: string) =>
-      (await json(`/repos/${owner}/${repo}/releases?per_page=50`, Releases)).map(toRelease),
+    releases: async (owner: string, repo: string, page = 1) =>
+      (
+        await json(
+          `/repos/${owner}/${repo}/releases?per_page=${RELEASES_PER_PAGE}${page > 1 ? `&page=${page}` : ""}`,
+          Releases,
+        )
+      ).map(toRelease),
 
     /** Latest release tag and the commit it points at, for SHA-pinned workflow actions. */
     async latestRelease(owner: string, repo: string): Promise<{ tag: string; sha?: string } | undefined> {
@@ -316,5 +328,7 @@ export function failingSection(log: string, maxLines = 400): string {
   if (errorIndex < 0) return lines.slice(-maxLines).join("\n");
   let start = errorIndex;
   while (start > 0 && !lines[start]?.startsWith("##[group]")) start--;
+  // A step that prints a lot before failing: keep what leads up to the error, never cut the error itself off.
+  if (errorIndex - start >= maxLines) start = errorIndex - Math.floor((maxLines * 3) / 4);
   return lines.slice(start, Math.min(lines.length, start + maxLines)).join("\n");
 }
