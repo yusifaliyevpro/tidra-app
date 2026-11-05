@@ -31,13 +31,15 @@ const RESCAN_MS = 12 * HOUR;
 
 export const securityKey = (projectId: string) => `security:${projectId}`;
 
+/** A failed lookup throws, so it isn't cached as an answer and the next scan asks again. */
 async function vulnDetails(svc: Services, id: string): Promise<OsvVuln | undefined> {
   const hit = await cached(svc, `osv:${id}`, 24 * HOUR, async () => {
     const response = await fetchWithRetry(svc.io.fetch, osvVulnUrl(id), {});
     const data: unknown = response.ok ? await response.json() : undefined;
-    return { vuln: z.validate(OsvVulnSchema, data) ? data : undefined };
-  });
-  return hit.vuln;
+    if (!z.validate(OsvVulnSchema, data)) throw new Error(`Could not read advisory ${id}`);
+    return { vuln: data };
+  }).catch(() => undefined);
+  return hit?.vuln;
 }
 
 export async function scanProject(
@@ -69,6 +71,7 @@ export async function scanProject(
       ]),
     );
     const findings: Finding[] = [];
+    let complete = true;
     for (let start = 0; start < packages.length; start += OSV_BATCH_LIMIT) {
       const chunk = packages.slice(start, start + OSV_BATCH_LIMIT);
       const response = await fetchWithRetry(svc.io.fetch, OSV_BATCH_URL, {
@@ -88,6 +91,7 @@ export async function scanProject(
       for (const [i, hit] of hits.entries()) {
         const vuln = details[i];
         if (vuln) findings.push(toFinding(vuln, hit.pkg, direct.has(hit.pkg.name)));
+        else complete = false;
       }
     }
     const unique = new Map(findings.map((f) => [`${f.id}:${f.name}@${f.version}`, f]));
@@ -95,16 +99,19 @@ export async function scanProject(
       projectId,
       findings: [...unique.values()],
       scanned: packages.length,
-      lockfileHash: workspace.lockfileHash,
+      // Without the hash the next scan doesn't reuse this one, so a missing advisory is looked up again.
+      lockfileHash: complete ? workspace.lockfileHash : undefined,
       updatedAt,
     };
     await writeSnapshot(svc, securityKey(projectId), report);
     return report;
   } catch (error) {
+    // Offline or OSV down: what was last known still holds, so it stays on screen next to the error.
+    const previous = await readSecurity(svc, projectId);
     const report = {
       projectId,
-      findings: [],
-      scanned: 0,
+      findings: previous?.findings ?? [],
+      scanned: previous?.scanned ?? 0,
       error: error instanceof Error ? error.message : String(error),
       updatedAt,
     };

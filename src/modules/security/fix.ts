@@ -1,9 +1,13 @@
+import semver from "semver";
+import { ulid } from "ulid";
+import { runs } from "@/core/db/schema";
 import type { Finding } from "@/engine/advisories";
 import { createGit } from "@/engine/git";
 import { editJsonOverrides, editYamlOverrides } from "@/engine/manifest";
-import { join } from "@/engine/path";
+import { join, relative } from "@/engine/path";
 import { installCommand } from "@/engine/pm";
-import { loadWorkspace } from "@/engine/workspace";
+import { parseVersionOutput } from "@/engine/toolchain";
+import { loadWorkspace, type Workspace } from "@/engine/workspace";
 import type { Services } from "@/services/context";
 import { refreshProject } from "@/services/projects";
 import { scanProject } from "@/services/security";
@@ -17,45 +21,59 @@ export async function fixDirect(svc: Services, projectId: string, finding: Findi
   return startUpdate(svc, projectId, [{ entry, version: finding.fixedIn }]);
 }
 
-/** Transitive dependencies get an override (pnpm/npm/bun) or resolution (yarn), then a reinstall and commit. */
+/** pnpm 10 reads overrides from pnpm-workspace.yaml; older versions only from `pnpm.overrides` in package.json. */
+async function pnpmReadsYamlOverrides(svc: Services, workspace: Workspace) {
+  const version =
+    workspace.pm.version ??
+    parseVersionOutput((await svc.io.run("pnpm", ["--version"], { cwd: workspace.root })).stdout);
+  return !version || !semver.valid(version) || semver.major(version) >= 10;
+}
+
+/**
+ * Transitive dependencies get an override (pnpm/npm/bun) or resolution (yarn), then a reinstall. The commit stays the
+ * user's click: a recorded run gives Commit on the project page its message.
+ */
 export async function fixWithOverride(svc: Services, projectId: string, finding: Finding): Promise<void> {
   const project = await svc.store.getProject(projectId);
   if (!project?.path || !finding.fixedIn) throw new Error("No fixed version is known for this advisory.");
   const workspace = await loadWorkspace(svc.io, project.path);
   const value = `^${finding.fixedIn}`;
-  let file: string;
-  if (workspace.pm.name === "pnpm") {
-    file = join(workspace.root, "pnpm-workspace.yaml");
-    const text = (await svc.io.readText(file)) ?? "";
-    await svc.io.writeText(file, editYamlOverrides(text, [{ name: finding.name, value }]));
+  const edit = [{ name: finding.name, value }];
+  const useYaml = workspace.pm.name === "pnpm" && (await pnpmReadsYamlOverrides(svc, workspace));
+  const file = join(workspace.root, useYaml ? "pnpm-workspace.yaml" : "package.json");
+  const original = await svc.io.readText(file);
+  if (useYaml) {
+    await svc.io.writeText(file, editYamlOverrides(original ?? "", edit));
   } else {
-    file = join(workspace.root, "package.json");
-    const text = workspace.importers[0]?.manifestText ?? "{}";
-    await svc.io.writeText(
-      file,
-      editJsonOverrides(text, workspace.pm.name === "yarn" ? "resolutions" : "overrides", [
-        { name: finding.name, value },
-      ]),
-    );
+    const field =
+      workspace.pm.name === "pnpm" ? "pnpm.overrides" : workspace.pm.name === "yarn" ? "resolutions" : "overrides";
+    await svc.io.writeText(file, editJsonOverrides(original ?? "{}", field, edit));
   }
   const install = installCommand(workspace.pm);
   const result = await svc.io.run(install.program, install.args, { cwd: workspace.root });
-  if (result.code !== 0) throw new Error(`${install.program} install failed:\n${result.stderr.slice(-2000)}`);
-  const git = createGit(svc.io, workspace.root);
-  const status = await git.status().catch(() => undefined);
-  if (status) {
-    const candidates = [
-      file.slice(workspace.root.length + 1),
-      "pnpm-lock.yaml",
-      "package-lock.json",
-      "yarn.lock",
-      "bun.lock",
-    ];
-    const present = [];
-    for (const path of candidates) if (await svc.io.exists(join(workspace.root, path))) present.push(path);
-    await git.add(present);
-    await git.commit(`fix(deps): override ${finding.name} to ${value} (${finding.id})`);
+  if (result.code !== 0) {
+    // Nothing fixed, so nothing stays behind: put the file back, or remove it if this fix created it.
+    if (original !== null) await svc.io.writeText(file, original);
+    else await createGit(svc.io, workspace.root).raw(["clean", "-f", "--", relative(workspace.root, file)]);
+    throw new Error(`${install.program} install failed:\n${result.stderr.slice(-2000)}`);
   }
+  const now = new Date().toISOString();
+  await svc.store.db.insert(runs).values({
+    id: ulid().toLowerCase(),
+    projectId,
+    kind: "fix",
+    title: `Override ${finding.name}`,
+    startedAt: now,
+    finishedAt: now,
+    ok: true,
+    result: {
+      ok: true,
+      message: `fix(deps): override ${finding.name} to ${value} (${finding.id})`,
+      changes: [],
+      touched: [],
+    },
+  });
+  svc.invalidate(["runs", projectId]);
   await scanProject(svc, projectId);
   await refreshProject(svc, projectId);
 }
