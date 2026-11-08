@@ -111,14 +111,9 @@ export async function createIssue(
   if (!title) throw new Error("Give the issue a title.");
   const dir = tempDir(io);
   const attach = options.attach && draft.screenshots.length > 0;
-  const files: string[] = [];
-  if (attach) {
-    for (const shot of draft.screenshots) {
-      const path = `${dir}/${shot.name}`;
-      await io.writeBytes(path, bytesOf(shot.dataUrl));
-      files.push("--attach", `${path}#${shot.name.replace(/\.\w+$/, "")}`);
-    }
-  }
+  const shots = attach ? draft.screenshots : [];
+  await Promise.all(shots.map((shot) => io.writeBytes(`${dir}/${shot.name}`, bytesOf(shot.dataUrl))));
+  const files = shots.flatMap((shot) => ["--attach", `${dir}/${shot.name}#${shot.name.replace(/\.\w+$/, "")}`]);
   const bodyFile = `${dir}/body.md`;
   await io.writeText(bodyFile, issueBody(draft, env, attach));
   const base = ["issue", "create", "-R", TIDRA_REPO, "--title", title, "--body-file", bodyFile, ...files];

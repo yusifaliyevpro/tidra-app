@@ -12,10 +12,18 @@ import {
   type Release,
   type RepoRef,
 } from "@/engine/changelog";
+import { createLimit } from "@/engine/limit";
 import { emptyConfig } from "@/engine/npmrc";
 import { GitHubError, RELEASES_PER_PAGE } from "@/integrations/github";
 import type { Services } from "./context";
 import { cached, HOUR } from "./snapshot";
+
+interface ReleaseTarget {
+  owner: string;
+  repo: string;
+  packages: Map<string, string[]>;
+  watched: boolean;
+}
 
 export interface ChangelogResult {
   repo?: RepoRef;
@@ -142,7 +150,7 @@ export async function buildTimeline(
   usage: Map<string, string[]>,
 ): Promise<{ items: TimelineItem[]; errors: string[] }> {
   const [watched, packages] = await Promise.all([svc.store.listWatchedRepos(), readWatchedPackages(svc)]);
-  const targets = new Map<string, { owner: string; repo: string; packages: Map<string, string[]>; watched: boolean }>();
+  const targets = new Map<string, ReleaseTarget>();
   for (const w of watched)
     targets.set(`${w.owner}/${w.repo}`.toLowerCase(), {
       owner: w.owner,
@@ -170,7 +178,11 @@ export async function buildTimeline(
   const cutoff = Date.now() - RECENT_DAYS * 86_400_000;
   const errors: string[] = [];
   const items: TimelineItem[] = [];
-  for (const target of targets.values()) {
+  const limit = createLimit(4);
+  // Once GitHub says the budget is gone, the repos still queued don't ask.
+  let rateLimited = false;
+  const readRepo = async (target: ReleaseTarget) => {
+    if (rateLimited) return;
     try {
       const releases = await releasesOf(svc, target.owner, target.repo);
       for (const release of releases) {
@@ -197,9 +209,10 @@ export async function buildTimeline(
       }
     } catch (error) {
       errors.push(`${target.owner}/${target.repo}: ${error instanceof Error ? error.message : String(error)}`);
-      if (error instanceof GitHubError && error.rateLimited) break;
+      if (error instanceof GitHubError && error.rateLimited) rateLimited = true;
     }
-  }
+  };
+  await Promise.all([...targets.values()].map((target) => limit(() => readRepo(target))));
   return { items: items.toSorted((a, b) => b.publishedAt.localeCompare(a.publishedAt)), errors };
 }
 

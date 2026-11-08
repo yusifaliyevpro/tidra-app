@@ -41,8 +41,12 @@ export function AddProjectsDialog({ open: isOpen, onClose }: { open: boolean; on
 
   const add = useMutation({
     mutationFn: async () => {
-      const ids = [];
-      for (const path of chosen) ids.push(await addProject(svc, path));
+      const ids: string[] = [];
+      for (const path of chosen) {
+        // One at a time: adding looks for an existing project first, so two checkouts of a repo would both add it.
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop
+        ids.push(await addProject(svc, path));
+      }
       await queryClient.invalidateQueries({ queryKey: ["reports"] });
       await queryClient.invalidateQueries({ queryKey: ["home"] });
       return ids;

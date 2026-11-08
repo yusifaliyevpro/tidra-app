@@ -197,6 +197,15 @@ function RemoveGlobalDialog({
   );
 }
 
+async function copyName(name: string) {
+  try {
+    await navigator.clipboard.writeText(name);
+    toast(`Copied ${name}.`);
+  } catch (error) {
+    toastError(error);
+  }
+}
+
 /** A package name that copies itself when clicked. */
 function CopyName({ name, className }: { name: string; className?: string }) {
   return (
@@ -204,7 +213,7 @@ function CopyName({ name, className }: { name: string; className?: string }) {
       type="button"
       title="Copy name"
       className={cn("truncate text-left font-medium hover:text-fg", className)}
-      onClick={() => void navigator.clipboard.writeText(name).then(() => toast(`Copied ${name}.`))}
+      onClick={() => void copyName(name)}
     >
       {name}
     </button>

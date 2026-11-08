@@ -73,8 +73,8 @@ function useIssueSettings(): { label: string; value: string }[] {
 }
 
 const chosenErrors = () => {
-  const { skippedErrors } = issueDraft.snapshot();
-  return recentErrors().filter((e) => !skippedErrors.includes(e.id));
+  const skipped = new Set(issueDraft.snapshot().skippedErrors);
+  return recentErrors().filter((e) => !skipped.has(e.id));
 };
 
 function useSubmit(attach: boolean) {
@@ -230,13 +230,14 @@ function ReportIssueBody() {
 function RecentErrors() {
   const { skippedErrors } = useSyncExternalStore(issueDraft.subscribe, issueDraft.snapshot);
   const errors = useSyncExternalStore(subscribeToasts, recentErrors);
+  const skipped = new Set(skippedErrors);
   if (errors.length === 0) return null;
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-sm font-medium text-fg">Recent errors</span>
       <div className="flex max-h-32 flex-col overflow-y-auto rounded-md border border-line-strong bg-surface py-1">
         {errors.toReversed().map((error) => (
-          <ErrorRow key={error.id} error={error} checked={!skippedErrors.includes(error.id)} />
+          <ErrorRow key={error.id} error={error} checked={!skipped.has(error.id)} />
         ))}
       </div>
     </div>
@@ -278,12 +279,12 @@ function Description() {
     const images = list.filter((f) => f.type.startsWith("image/"));
     if (images.length === 0) return false;
     const at = area.current?.selectionStart ?? draft.body.length;
-    const added: Screenshot[] = [];
-    let n = draft.screenshots.length;
-    for (const file of images) {
-      n += 1;
-      added.push({ name: `screenshot-${n}.${file.type.split("/")[1] ?? "png"}`, dataUrl: await readDataUrl(file) });
-    }
+    const start = draft.screenshots.length;
+    const urls = await Promise.all(images.map(readDataUrl));
+    const added: Screenshot[] = images.map((file, i) => ({
+      name: `screenshot-${start + i + 1}.${file.type.split("/")[1] ?? "png"}`,
+      dataUrl: urls[i] ?? "",
+    }));
     const refs = added.map((s) => `![${s.name.replace(/\.\w+$/, "")}](${s.name})`).join("\n");
     const { body, screenshots } = issueDraft.snapshot().draft;
     issueDraft.edit({

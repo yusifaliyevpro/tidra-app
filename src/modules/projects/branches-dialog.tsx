@@ -43,6 +43,7 @@ function OpenBranches({ projectId, label, onClose }: { projectId: string; label:
   const branches = details.data?.branches ?? [];
   const removable = branches.filter(deletable);
   const removeAll = (list: BranchDetail[]) => remove.mutate(list.map((b) => b.name));
+  const deleting = new Set(remove.isPending ? remove.variables : []);
 
   return (
     <>
@@ -71,7 +72,7 @@ function OpenBranches({ projectId, label, onClose }: { projectId: string; label:
               key={branch.name}
               branch={branch}
               busy={remove.isPending}
-              deleting={remove.isPending && remove.variables.includes(branch.name)}
+              deleting={deleting.has(branch.name)}
               onDelete={() => (branch.merged ? removeAll([branch]) : setConfirming([branch]))}
             />
           ))}

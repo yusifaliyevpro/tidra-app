@@ -115,7 +115,7 @@ function ciStates(entries: NonNullable<Awaited<ReturnType<typeof readCi>>>["entr
 export async function homeSummary(svc: Services): Promise<HomeSummary> {
   const reports = await readAllReports(svc);
   const repos = groupRepos(reports);
-  const [inbox, ci, bots, deploys, threshold, dismissed, actions, timeline] = await Promise.all([
+  const [inbox, ci, bots, deploys, threshold, dismissed, actions, timeline, securityReports] = await Promise.all([
     readInbox(svc),
     readCi(svc),
     readBotPulls(svc),
@@ -124,11 +124,11 @@ export async function homeSummary(svc: Services): Promise<HomeSummary> {
     dismissedAdvisories(svc),
     readAllActions(svc, repos),
     readSnapshot<{ items: TimelineItem[] }>(svc, "watched-releases"),
+    readAllSecurity(
+      svc,
+      reports.map(({ project }) => project.id),
+    ),
   ]);
-  const securityReports = await readAllSecurity(
-    svc,
-    reports.map(({ project }) => project.id),
-  );
   const ciInfo = ciStates(ci?.entries ?? []);
 
   const repoOf = new Map(repos.flatMap((repo) => repo.projects.map((p) => [p.id, repo] as const)));

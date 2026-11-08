@@ -121,8 +121,7 @@ export interface BranchDetail {
 
 /** The ref merged branches went into: upstream's default branch for a fork, else origin's. */
 async function mergeBase(git: Git): Promise<string | undefined> {
-  const fork = await git.fork().catch(() => undefined);
-  const name = await git.defaultBranch();
+  const [fork, name] = await Promise.all([git.fork().catch(() => undefined), git.defaultBranch()]);
   const candidates = [fork?.ref, name && `origin/${name}`, "origin/main", "origin/master", "main", "master"];
   for (const ref of candidates) {
     if (ref && (await git.raw(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`])).code === 0) return ref;
@@ -175,6 +174,8 @@ export async function deleteBranches(svc: Services, projectId: string, names: st
   const deleted: string[] = [];
   const failed: string[] = [];
   for (const name of names.filter((n) => n !== current)) {
+    // One at a time: git locks refs (and packed-refs) while deleting, so parallel deletes fail.
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop
     await git.deleteBranch(name).then(
       () => deleted.push(name),
       (error: unknown) => failed.push(`${name}: ${firstLine(error)}`),

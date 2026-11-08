@@ -221,6 +221,7 @@ function DependencyRow({
     >
       <label htmlFor={id} className="flex h-full shrink-0 items-center pr-2.5 pl-4">
         <Checkbox id={id} label={`Select ${entry.name}`} checked={picked} onChange={() => onToggle([rowKey])} />
+        <span className="sr-only">Select {entry.name}</span>
       </label>
       <button
         type="button"

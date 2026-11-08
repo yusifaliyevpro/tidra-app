@@ -79,6 +79,8 @@ async function pendingRun(svc: Services, projectId: string) {
 /** Commit, then push, refreshing once at the end: in between, the screen would briefly offer a lone Push. */
 export async function commitAndPushProject(svc: Services, projectId: string): Promise<string> {
   const message = await commitChanges(svc, projectId);
+  // The push sends the commit made above, so it has to wait for it.
+  // react-doctor-disable-next-line react-doctor/server-sequential-independent-await
   const branch = await pushBranch(svc, projectId);
   await refreshRepo(svc, projectId);
   return `Committed "${message}" and pushed ${branch}.`;

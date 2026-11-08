@@ -204,11 +204,13 @@ export async function runUpdate(
     result.previousBranch = status.branch;
     // Other uncommitted work is fine; it stays out of what revert undoes.
     const dirtyBefore = new Set(status.changed > 0 ? await git.changedPaths().catch((): string[] => []) : []);
-    for (const path of dirtyBefore) {
-      if (!isPackageFile(path)) continue;
-      const text = await io.readText(join(workspace.root, path));
-      if (text !== null) (result.restore ??= []).push({ path, text });
-    }
+    const packageFiles = [...dirtyBefore].filter(isPackageFile);
+    const texts = await Promise.all(packageFiles.map((path) => io.readText(join(workspace.root, path))));
+    const restore = packageFiles.flatMap((path, i) => {
+      const text = texts[i];
+      return typeof text === "string" ? [{ path, text }] : [];
+    });
+    if (restore.length > 0) result.restore = restore;
     const other = [...dirtyBefore].filter((path) => !isPackageFile(path));
     if (other.length > 0) result.otherWork = other;
     done();
@@ -216,23 +218,26 @@ export async function runUpdate(
     result.touched = changes.map((c) => relative(workspace.root, c.path));
     if (catalogChanges.length > 0) {
       begin("write");
-      for (const change of catalogChanges) await io.writeText(change.path, change.after);
+      await Promise.all(catalogChanges.map((change) => io.writeText(change.path, change.after)));
       done();
     } else skip("write");
 
     begin("install");
     try {
-      for (const add of adds) await exec(add.command, join(workspace.root, add.importer));
+      for (const add of adds) {
+        // One at a time: every add rewrites the same lockfile.
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop
+        await exec(add.command, join(workspace.root, add.importer));
+      }
       if (catalogChanges.length > 0) await exec(installCommand(workspace.pm));
     } finally {
       // Also when an install fails: an earlier one may already have rewritten the lockfile, and Revert must restore it.
-      for (const dir of new Set([".", ...adds.map((a) => a.importer)])) {
-        for (const name of LOCKFILE_NAMES) {
-          const path = dir === "." ? name : `${dir}/${name}`;
-          if (!result.touched.includes(path) && (await io.exists(join(workspace.root, path))))
-            result.touched.push(path);
-        }
-      }
+      const lockfiles = [...new Set([".", ...adds.map((a) => a.importer)])].flatMap((dir) =>
+        LOCKFILE_NAMES.map((name) => (dir === "." ? name : `${dir}/${name}`)),
+      );
+      const planned = new Set(result.touched);
+      const present = await Promise.all(lockfiles.map((path) => io.exists(join(workspace.root, path))));
+      result.touched.push(...lockfiles.filter((path, i) => present[i] && !planned.has(path)));
       // The package manager may rewrite more than Tidra planned (pnpm prunes minimumReleaseAgeExclude in
       // pnpm-workspace.yaml); a tracked change that wasn't there before belongs to this update.
       const known = new Set(result.touched);
@@ -247,7 +252,11 @@ export async function runUpdate(
 
     if (options.checks.length > 0) {
       begin("checks");
-      for (const check of options.checks) await exec(check.command);
+      for (const check of options.checks) {
+        // In order, stopping at the first failure, like the project's own CI.
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop
+        await exec(check.command);
+      }
       done();
     } else skip("checks");
 
@@ -269,10 +278,14 @@ export async function revertUpdate(
 ) {
   const git = createGit(io, workspace.root);
   const saved = new Map(result.restore?.map((r) => [r.path, r.text]));
+  const touched = new Set(result.touched);
   const fromHead = result.touched.filter((path) => !saved.has(path));
   if (fromHead.length > 0) await git.restore(fromHead);
-  for (const [path, text] of saved)
-    if (result.touched.includes(path)) await io.writeText(join(workspace.root, path), text);
+  await Promise.all(
+    [...saved]
+      .filter(([path]) => touched.has(path))
+      .map(([path, text]) => io.writeText(join(workspace.root, path), text)),
+  );
   if (result.createdBranch && result.previousBranch) {
     await git.switchTo(result.previousBranch);
     await git.deleteBranch(result.createdBranch);
