@@ -1,9 +1,15 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { getVersion } from "@tauri-apps/api/app";
+import * as z from "@zod/mini";
+import { cn } from "cn";
 import { ImagePlus, X } from "lucide-react";
-import { useRef, useState, useSyncExternalStore, type ClipboardEvent, type DragEvent } from "react";
+import { useId, useRef, useState, useSyncExternalStore, type ClipboardEvent, type DragEvent } from "react";
+import { ACCENT_SETTING, DEFAULT_ACCENT } from "@/app/desktop";
+import { useSetting, useSyncStatus } from "@/app/queries";
 import { useServices } from "@/app/services";
+import { THEME_SETTING, THEMES } from "@/app/theme";
 import { inTauri } from "@/core/native";
+import { CI_THRESHOLD_SETTING, readCiThreshold } from "@/services/home";
 import { issueDraft } from "@/services/issue-draft";
 import {
   createIssue,
@@ -17,11 +23,11 @@ import {
 import { Button } from "@/ui/button";
 import { Dialog } from "@/ui/dialog";
 import { openExternal } from "@/ui/external";
-import { Field, Input, Textarea } from "@/ui/field";
+import { Checkbox, Field, Input, Textarea } from "@/ui/field";
 import { Note } from "@/ui/layout";
 import { Markdown } from "@/ui/markdown";
 import { Segmented } from "@/ui/misc";
-import { toast, toastError } from "@/ui/toast";
+import { recentErrors, subscribeToasts, toast, toastError, type RecentError } from "@/ui/toast";
 
 const readDataUrl = (file: File) =>
   new Promise<string>((resolve, reject) => {
@@ -50,15 +56,37 @@ function useGh() {
   return useQuery({ queryKey: ["gh-state"], queryFn: () => ghState(svc.io), staleTime: 5 * 60_000, enabled: inTauri });
 }
 
+/** Settings that change how Tidra behaves, sent with every issue. */
+function useIssueSettings(): { label: string; value: string }[] {
+  const svc = useServices();
+  const { data: theme } = useSetting(THEME_SETTING, z.enum(THEMES), "system");
+  const { data: accent } = useSetting(ACCENT_SETTING, z.string(), DEFAULT_ACCENT);
+  const { data: ci } = useQuery({ queryKey: ["setting", CI_THRESHOLD_SETTING], queryFn: () => readCiThreshold(svc) });
+  const { data: sync } = useSyncStatus();
+  return [
+    { label: "Theme", value: theme ?? "system" },
+    { label: "Accent", value: accent ?? DEFAULT_ACCENT },
+    { label: "Background checks", value: svc.scheduler.isPaused() ? "paused" : "on" },
+    { label: "CI audit level", value: ci ? `${ci.level}${ci.prodOnly ? ", production only" : ""}` : "default" },
+    { label: "Sync", value: sync?.connected ? (sync.provider ?? "on") : "off" },
+  ];
+}
+
+const chosenErrors = () => {
+  const { skippedErrors } = issueDraft.snapshot();
+  return recentErrors().filter((e) => !skippedErrors.includes(e.id));
+};
+
 function useSubmit(attach: boolean) {
   const svc = useServices();
   const version = useQuery({ queryKey: ["version"], queryFn: () => getVersion(), enabled: inTauri });
+  const settings = useIssueSettings();
   return useMutation({
     mutationFn: () =>
       createIssue(
         svc.io,
         issueDraft.snapshot().draft,
-        { version: version.data ?? "dev", platform: svc.io.platform },
+        { version: version.data ?? "dev", platform: svc.io.platform, settings, errors: chosenErrors() },
         { attach },
       ),
     onSuccess: ({ url, screenshotsLeft }) => {
@@ -193,7 +221,38 @@ function ReportIssueBody() {
         />
       </div>
       <Description />
+      <RecentErrors />
     </div>
+  );
+}
+
+/** Errors from this session go with the issue unless unchecked; they can hold paths or names. */
+function RecentErrors() {
+  const { skippedErrors } = useSyncExternalStore(issueDraft.subscribe, issueDraft.snapshot);
+  const errors = useSyncExternalStore(subscribeToasts, recentErrors);
+  if (errors.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-sm font-medium text-fg">Recent errors</span>
+      <div className="flex max-h-32 flex-col overflow-y-auto rounded-md border border-line-strong bg-surface py-1">
+        {errors.toReversed().map((error) => (
+          <ErrorRow key={error.id} error={error} checked={!skippedErrors.includes(error.id)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ErrorRow({ error, checked }: { error: RecentError; checked: boolean }) {
+  const id = useId();
+  return (
+    <label htmlFor={id} className="flex h-7 shrink-0 items-center gap-2.5 px-2.5 text-sm hover:bg-hover">
+      <Checkbox id={id} label="Send this error" checked={checked} onChange={() => issueDraft.toggleError(error.id)} />
+      <span className="shrink-0 font-mono text-xs text-faint">{error.at.slice(11, 19)}</span>
+      <span className={cn("truncate", checked ? "text-fg" : "text-faint line-through")} title={error.message}>
+        {error.message}
+      </span>
+    </label>
   );
 }
 

@@ -52,9 +52,14 @@ export interface IssueDraft {
   screenshots: Screenshot[];
 }
 
+/** What the app adds below the description, so whoever fixes the issue doesn't have to ask. */
 export interface Environment {
   version: string;
   platform: string;
+  /** Settings that change behaviour, as label and value. */
+  settings?: { label: string; value: string }[];
+  /** Errors from this session the user chose to send. */
+  errors?: { at: string; message: string }[];
 }
 
 const tempDir = (io: Io) => join(io.env.TEMP ?? io.env.TMPDIR ?? "/tmp", "tidra-issue");
@@ -71,8 +76,23 @@ export function issueBody(draft: IssueDraft, env: Environment, attached: boolean
     const ref = new RegExp(`!\\[([^\\]]*)\\]\\(${escapeRegExp(shot.name)}\\)`, "g");
     body = body.replace(ref, attached ? `![$1](./${shot.name})` : "");
   }
-  const kind = ISSUE_KINDS.find((k) => k.value === draft.kind)?.label ?? draft.kind;
-  return `${body.trim()}\n\n---\n**Type:** ${kind} · **Tidra** ${env.version} · ${env.platform}\n`;
+  const type = ISSUE_KINDS.map((k) => `- [${k.value === draft.kind ? "x" : " "}] ${k.label}`).join("\n");
+  const sections = [
+    `## Type\n\n${type}`,
+    `## Description\n\n${body.trim() || "_No description._"}`,
+    "---",
+    `**Tidra** ${env.version} · ${env.platform}`,
+  ];
+  if (env.settings?.length) {
+    const list = env.settings.map((s) => `- ${s.label}: ${s.value}`).join("\n");
+    sections.push(`<details><summary>Settings</summary>\n\n${list}\n\n</details>`);
+  }
+  if (env.errors?.length) {
+    // A tilde fence, so backticks inside a message can't close it.
+    const log = env.errors.map((e) => `${e.at} ${e.message}`).join("\n");
+    sections.push(`<details><summary>Recent errors</summary>\n\n~~~\n${log}\n~~~\n\n</details>`);
+  }
+  return `${sections.join("\n\n")}\n`;
 }
 
 const bytesOf = (dataUrl: string) =>

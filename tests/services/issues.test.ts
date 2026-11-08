@@ -47,10 +47,29 @@ describe("ghState", () => {
 });
 
 describe("issueBody", () => {
-  it("points screenshots at the attached files and ends with the type and environment", () => {
+  it("checks the type, then the description, then the app's version below a rule", () => {
     expect(issueBody(draft(), ENV, true)).toBe(
-      "Steps\n\n![screenshot-1](./screenshot-1.png)\n\n---\n**Type:** Bug · **Tidra** 1.0.2 · windows\n",
+      [
+        "## Type\n\n- [x] Bug\n- [ ] Regression\n- [ ] Feature",
+        "## Description\n\nSteps\n\n![screenshot-1](./screenshot-1.png)",
+        "---",
+        "**Tidra** 1.0.2 · windows\n",
+      ].join("\n\n"),
     );
+  });
+
+  it("adds settings and the chosen errors in collapsed sections", () => {
+    const body = issueBody(
+      draft({ screenshots: [] }),
+      {
+        ...ENV,
+        settings: [{ label: "Theme", value: "dark" }],
+        errors: [{ at: "2026-11-08T13:02:11.000Z", message: "git push failed: ```rejected```" }],
+      },
+      false,
+    );
+    expect(body).toContain("<details><summary>Settings</summary>\n\n- Theme: dark\n\n</details>");
+    expect(body).toContain("~~~\n2026-11-08T13:02:11.000Z git push failed: ```rejected```\n~~~");
   });
 
   it("drops screenshot references when they can't be attached", () => {

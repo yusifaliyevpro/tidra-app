@@ -4,11 +4,13 @@ import type { IssueDraft } from "./issues";
 export interface IssueDraftState {
   open: boolean;
   draft: IssueDraft;
+  /** Recent errors (toast ids) the user unchecked; they may hold private data. */
+  skippedErrors: number[];
 }
 
 const EMPTY: IssueDraft = { title: "", body: "", kind: "bug", screenshots: [] };
 
-let state: IssueDraftState = { open: false, draft: EMPTY };
+let state: IssueDraftState = { open: false, draft: EMPTY, skippedErrors: [] };
 const listeners = new Set<() => void>();
 const set = (next: IssueDraftState) => {
   state = next;
@@ -24,5 +26,12 @@ export const issueDraft = {
   open: () => set({ ...state, open: true }),
   close: () => set({ ...state, open: false }),
   edit: (patch: Partial<IssueDraft>) => set({ ...state, draft: { ...state.draft, ...patch } }),
-  clear: () => set({ open: false, draft: EMPTY }),
+  toggleError: (id: number) =>
+    set({
+      ...state,
+      skippedErrors: state.skippedErrors.includes(id)
+        ? state.skippedErrors.filter((e) => e !== id)
+        : [...state.skippedErrors, id],
+    }),
+  clear: () => set({ open: false, draft: EMPTY, skippedErrors: [] }),
 };
