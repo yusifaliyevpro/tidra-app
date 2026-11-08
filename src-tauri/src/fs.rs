@@ -20,13 +20,22 @@ pub async fn fs_read_text(path: String) -> Result<Option<String>, String> {
 /// Writes through a sibling temp file and renames it, so a crash never leaves a half-written manifest.
 #[tauri::command]
 pub async fn fs_write_text(path: String, contents: String) -> Result<(), String> {
-    write_atomic(Path::new(&path), &contents).await.map_err(|err| format!("{path}: {err}"))
+    write_atomic(Path::new(&path), contents.as_bytes()).await.map_err(|err| format!("{path}: {err}"))
 }
 
-async fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
+/// Binary files, such as screenshots handed to `gh issue create --attach`.
+#[tauri::command]
+pub async fn fs_write_bytes(path: String, bytes: Vec<u8>) -> Result<(), String> {
+    write_atomic(Path::new(&path), &bytes).await.map_err(|err| format!("{path}: {err}"))
+}
+
+async fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     // Through a symlink, not over it; and the new file keeps the old one's permissions.
     let target = tokio::fs::canonicalize(path).await.unwrap_or_else(|_| path.to_path_buf());
     let permissions = tokio::fs::metadata(&target).await.ok().map(|meta| meta.permissions());
+    if let Some(parent) = target.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
     let tmp = temp_sibling(&target);
     tokio::fs::write(&tmp, contents).await?;
     let moved = async {
@@ -110,10 +119,19 @@ mod tests {
     async fn writes_new_and_existing_files_without_leaving_a_temp_file() {
         let dir = temp_dir("write");
         let file = dir.join("package.json");
-        write_atomic(&file, "one").await.unwrap();
-        write_atomic(&file, "two").await.unwrap();
+        write_atomic(&file, b"one").await.unwrap();
+        write_atomic(&file, b"two").await.unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "two");
         assert_eq!(names(&dir), ["package.json"]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn creates_missing_parent_folders() {
+        let dir = temp_dir("parents");
+        let file = dir.join("a").join("b.png");
+        write_atomic(&file, &[0, 159, 146, 150]).await.unwrap();
+        assert_eq!(std::fs::read(&file).unwrap(), [0, 159, 146, 150]);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -122,7 +140,7 @@ mod tests {
         let dir = temp_dir("rename");
         let target = dir.join("taken");
         std::fs::create_dir(&target).unwrap();
-        assert!(write_atomic(&target, "x").await.is_err());
+        assert!(write_atomic(&target, b"x").await.is_err());
         assert_eq!(names(&dir), ["taken"]);
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -135,7 +153,7 @@ mod tests {
         let file = dir.join("run.sh");
         std::fs::write(&file, "old").unwrap();
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
-        write_atomic(&file, "new").await.unwrap();
+        write_atomic(&file, b"new").await.unwrap();
         assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o755);
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -148,7 +166,7 @@ mod tests {
         let link = dir.join("link.json");
         std::fs::write(&real, "old").unwrap();
         std::os::unix::fs::symlink(&real, &link).unwrap();
-        write_atomic(&link, "new").await.unwrap();
+        write_atomic(&link, b"new").await.unwrap();
         assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
         assert_eq!(std::fs::read_to_string(&real).unwrap(), "new");
         std::fs::remove_dir_all(dir).unwrap();

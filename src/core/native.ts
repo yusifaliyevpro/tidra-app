@@ -97,6 +97,7 @@ export function createTauriIo(env: AppEnv): Io {
   return {
     readText: (path) => invoke<string | null>("fs_read_text", { path }),
     writeText: (path, contents) => invoke("fs_write_text", { path, contents }),
+    writeBytes: (path, bytes) => invoke("fs_write_bytes", { path, bytes: Array.from(bytes) }),
     readDir: (path) => invoke<DirEntry[]>("fs_read_dir", { path }),
     exists: (path) => invoke<boolean>("fs_exists", { path }),
     run: async (program, args, options) => {

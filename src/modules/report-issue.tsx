@@ -5,7 +5,15 @@ import { useRef, useState, useSyncExternalStore, type ClipboardEvent, type DragE
 import { useServices } from "@/app/services";
 import { inTauri } from "@/core/native";
 import { issueDraft } from "@/services/issue-draft";
-import { createIssue, ghState, ISSUE_KINDS, type GhState, type IssueKind, type Screenshot } from "@/services/issues";
+import {
+  createIssue,
+  GH_ATTACH_VERSION,
+  ghState,
+  ISSUE_KINDS,
+  type GhState,
+  type IssueKind,
+  type Screenshot,
+} from "@/services/issues";
 import { Button } from "@/ui/button";
 import { Dialog } from "@/ui/dialog";
 import { openExternal } from "@/ui/external";
@@ -42,15 +50,17 @@ function useGh() {
   return useQuery({ queryKey: ["gh-state"], queryFn: () => ghState(svc.io), staleTime: 5 * 60_000, enabled: inTauri });
 }
 
-function useSubmit() {
+function useSubmit(attach: boolean) {
   const svc = useServices();
   const version = useQuery({ queryKey: ["version"], queryFn: () => getVersion(), enabled: inTauri });
   return useMutation({
     mutationFn: () =>
-      createIssue(svc.io, issueDraft.snapshot().draft, {
-        version: version.data ?? "dev",
-        platform: svc.io.platform,
-      }),
+      createIssue(
+        svc.io,
+        issueDraft.snapshot().draft,
+        { version: version.data ?? "dev", platform: svc.io.platform },
+        { attach },
+      ),
     onSuccess: ({ url, screenshotsLeft }) => {
       issueDraft.clear();
       if (screenshotsLeft) {
@@ -65,7 +75,7 @@ function useSubmit() {
 function Footer() {
   const { draft } = useSyncExternalStore(issueDraft.subscribe, issueDraft.snapshot);
   const gh = useGh();
-  const submit = useSubmit();
+  const submit = useSubmit(gh.data?.state === "ready" && gh.data.attach);
   return (
     <>
       <Button variant="ghost" onClick={issueDraft.close}>
@@ -83,9 +93,34 @@ function Footer() {
   );
 }
 
-function GhNotice({ gh, onRetry, checking }: { gh: GhState | undefined; onRetry: () => void; checking: boolean }) {
+function GhUpdateNotice({ gh, screenshots }: { gh: Extract<GhState, { state: "ready" }>; screenshots: number }) {
   const svc = useServices();
-  if (!gh || gh.state === "ready") return null;
+  const upgrade = svc.io.platform === "windows" ? "winget upgrade --id GitHub.cli" : "brew upgrade gh";
+  return (
+    <Note>
+      <span className="text-fg">
+        GitHub CLI {gh.version} can't attach screenshots. Update to {GH_ATTACH_VERSION} or newer:
+      </span>{" "}
+      <code className="font-mono text-fg">{upgrade}</code>
+      {screenshots > 0 ? ". Until then, the issue opens on GitHub for you to add them." : "."}
+    </Note>
+  );
+}
+
+function GhNotice({
+  gh,
+  onRetry,
+  checking,
+  screenshots,
+}: {
+  gh: GhState | undefined;
+  onRetry: () => void;
+  checking: boolean;
+  screenshots: number;
+}) {
+  const svc = useServices();
+  if (!gh) return null;
+  if (gh.state === "ready") return gh.attach ? null : <GhUpdateNotice gh={gh} screenshots={screenshots} />;
   const install = svc.io.platform === "windows" ? "winget install --id GitHub.cli" : "brew install gh";
   return (
     <Note>
@@ -128,7 +163,12 @@ function ReportIssueBody() {
   const gh = useGh();
   return (
     <div className="flex flex-col gap-4">
-      <GhNotice gh={gh.data} checking={gh.isFetching} onRetry={() => void gh.refetch()} />
+      <GhNotice
+        gh={gh.data}
+        checking={gh.isFetching}
+        onRetry={() => void gh.refetch()}
+        screenshots={draft.screenshots.length}
+      />
       <div className="flex items-end gap-3">
         <div className="flex-1">
           <Field label="Title">

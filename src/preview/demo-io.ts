@@ -139,6 +139,9 @@ export function createDemoIo(): Io {
     writeText: async (path, contents) => {
       files.set(normalize(path), contents);
     },
+    writeBytes: async (path, bytes) => {
+      files.set(normalize(path), `[${bytes.length} bytes]`);
+    },
     exists: async (path) => files.has(normalize(path)) || dirs().has(normalize(path)),
     readDir: async (path) => {
       const base = normalize(path);
