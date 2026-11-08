@@ -59,6 +59,9 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           assignee_trigger: yusifaliyevpro
+          # The Claude app's own account; the default id is GitHub Actions', which credits github-actions[bot].
+          bot_id: "209825114"
+          bot_name: claude[bot]
           base_branch: main
           branch_prefix: claude/
           track_progress: true

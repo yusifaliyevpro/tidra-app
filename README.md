@@ -26,7 +26,7 @@ Tidra watches the projects on your machine and tells you what needs attention: o
 The name comes from _tide_: the steady stream of upstream releases your projects have to keep up with. The logo is the two version range symbols from `package.json`: the `^` (caret) on top and the `~` (tilde) wave below.
 
 <p align="center">
-  <img src="assets/overview.png" alt="Tidra overview: outdated packages, advisories, CI and pull requests across every project" />
+  <img src="assets/overview.png" alt="Tidra's Projects screen: every project with its branch, outdated packages by bump and advisories" />
 </p>
 
 > Status: early development. Not ready for daily use yet.

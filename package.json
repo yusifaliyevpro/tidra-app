@@ -21,7 +21,8 @@
     "test:coverage": "vitest run --coverage",
     "react-doctor": "react-doctor --verbose",
     "db:generate": "drizzle-kit generate",
-    "cdp": "node scripts/cdp.ts"
+    "cdp": "node scripts/cdp.ts",
+    "release": "node scripts/release.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.98",
