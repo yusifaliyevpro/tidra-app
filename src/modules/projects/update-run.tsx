@@ -18,7 +18,6 @@ import { RunChecksButton } from "./run-checks";
 
 const STEP_LABEL: Record<UpdateStep, string> = {
   preflight: "Check tree",
-  branch: "Branch",
   write: "Edit",
   install: "Install",
   checks: "Checks",
@@ -74,7 +73,7 @@ function StatusHeader({ progress }: { progress: RunProgress | undefined }) {
     const running = UPDATE_STEPS.find((step) => progress?.steps[step]?.state === "running");
     return (
       <div className="flex items-center gap-3">
-        <Spinner className="size-5 text-accent" />
+        <Spinner className="size-5 text-info" />
         <div className="flex flex-col">
           <span className="text-lg font-medium">Updating</span>
           <span className="text-sm text-muted">{running ? STEP_LABEL[running] : "Starting"}…</span>
@@ -149,7 +148,7 @@ function StepDot({ state }: { state: StepState }) {
   if (state?.state === "running")
     return (
       <span className={cn(base, "border-accent/60 bg-accent/10")}>
-        <Spinner className="size-3 text-accent" />
+        <Spinner className="size-3 text-info" />
       </span>
     );
   if (state?.state === "done")

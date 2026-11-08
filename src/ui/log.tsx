@@ -38,7 +38,7 @@ export function Log({
         pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
       }}
       className={cn(
-        "overflow-auto rounded-md border border-line bg-[#09090a] p-3 font-mono text-sm leading-[18px] whitespace-pre-wrap text-fg",
+        "overflow-auto rounded-md border border-line bg-log p-3 font-mono text-sm leading-[18px] whitespace-pre-wrap text-fg",
         className,
       )}
       data-selectable

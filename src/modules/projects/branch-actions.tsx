@@ -1,20 +1,32 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "cn";
-import { ArrowUpFromLine, ChevronDown, ExternalLink, GitCommitHorizontal, GitPullRequestArrow } from "lucide-react";
+import {
+  ArrowUpFromLine,
+  ChevronDown,
+  ExternalLink,
+  GitBranchPlus,
+  GitCommitHorizontal,
+  GitPullRequestArrow,
+} from "lucide-react";
+import { useState } from "react";
 import { useServices } from "@/app/services";
 import type { GitStatus } from "@/engine/git";
 import {
   branchPull,
   commitAndPushProject,
   commitProject,
+  commitToNewBranch,
   hasUnpushed,
   isTidraBranch,
   openPullRequest,
   pushProject,
 } from "@/services/pull-requests";
+import { branchName } from "@/services/updates";
 import { Button } from "@/ui/button";
+import { Dialog } from "@/ui/dialog";
 import { openExternal } from "@/ui/external";
-import { MenuItem, Popover } from "@/ui/popover";
+import { Field, Input } from "@/ui/field";
+import { MenuItem, MenuSeparator, Popover } from "@/ui/popover";
 import { Spinner } from "@/ui/spinner";
 import { toast, toastError } from "@/ui/toast";
 
@@ -29,9 +41,11 @@ const only = (action: () => void) => (event: { preventDefault(): void; stopPropa
   action();
 };
 
+const DEFAULT_BRANCHES = ["main", "master", "develop"];
+
 /**
- * What can be done with the current branch, without leaving Tidra: push unpushed commits, open its pull request,
- * and once one is open, link to it.
+ * What can be done with the current branch, without leaving Tidra: commit and push, push unpushed commits, open a pull
+ * request from any branch other than the default one, and once one is open, link to it.
  */
 function branchState(git: GitStatus | undefined, allowCommit: boolean | undefined) {
   const branch = git?.branch;
@@ -39,7 +53,7 @@ function branchState(git: GitStatus | undefined, allowCommit: boolean | undefine
   return {
     branch,
     updateBranch,
-    featureBranch: Boolean(branch && git?.upstream && !["main", "master", "develop"].includes(branch)),
+    featureBranch: Boolean(branch && !DEFAULT_BRANCHES.includes(branch)),
     // A tracked branch is pushed by Sync; Push is only for publishing a branch the first time.
     unpushed: hasUnpushed(git) && !git?.upstream,
     // An update stopped by its checks leaves its changes uncommitted; pushing alone would send nothing.
@@ -60,21 +74,23 @@ export function BranchActions({
   allowCommit?: boolean;
 }) {
   const svc = useServices();
-  const { branch, updateBranch, featureBranch, unpushed, canCommit } = branchState(git, allowCommit);
+  const { branch, featureBranch, unpushed, canCommit } = branchState(git, allowCommit);
   const { data: pull } = useQuery({
     queryKey: ["branch-pull", projectId, branch],
-    enabled: (updateBranch || featureBranch) && !svc.preview,
+    enabled: featureBranch && !svc.preview,
     staleTime: 60_000,
     queryFn: () => (branch ? branchPull(svc, projectId, branch) : { state: "none" as const }),
   });
   const open = pull?.state === "open" ? pull : undefined;
-  if (!canCommit && !unpushed && !open && !(updateBranch && pull)) return null;
+  // Open PR only off the default branch, once its pull request is known not to exist yet.
+  const canOpenPull = featureBranch && pull?.state === "none";
+  if (!canCommit && !unpushed && !open && !canOpenPull) return null;
   return (
     <span className="flex gap-1.5">
       <LocalWork projectId={projectId} size={size} canCommit={canCommit} unpushed={unpushed} hasPull={Boolean(open)} />
       {open?.url ? (
         <PullLink url={open.url} number={open.number} title={open.title} size={size} />
-      ) : updateBranch && pull ? (
+      ) : canOpenPull ? (
         <OpenPullRequestButton projectId={projectId} size={size} />
       ) : null}
     </span>
@@ -114,10 +130,11 @@ function PullLink({ url, number, title, size }: { url: string; number?: number; 
 
 type CommitAction = "commit-push" | "commit" | "push";
 
-/** "Commit & Push" with a menu for doing just one of the two. */
+/** "Commit & Push" with a menu for doing just one of the two, or for taking the work to a new branch first. */
 function CommitPushButton({ projectId, size }: { projectId: string; size: Size }) {
   const svc = useServices();
   const queryClient = useQueryClient();
+  const [branching, setBranching] = useState(false);
   const action = useMutation({
     mutationFn: async (kind: CommitAction) => {
       if (kind === "commit") return `Committed "${await commitProject(svc, projectId)}".`;
@@ -156,7 +173,7 @@ function CommitPushButton({ projectId, size }: { projectId: string; size: Size }
             aria-label="More commit options"
             aria-expanded={open}
             disabled={action.isPending}
-            className={cn("rounded-l-none border-l border-black/25 px-1.5", open && "brightness-110")}
+            className={cn("ml-px rounded-l-none px-1.5", open && "bg-accent-hover")}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -191,10 +208,72 @@ function CommitPushButton({ projectId, size }: { projectId: string; size: Size }
               <ArrowUpFromLine className="size-3.5" />
               Push
             </MenuItem>
+            <MenuSeparator />
+            <MenuItem
+              onSelect={() => {
+                close();
+                setBranching(true);
+              }}
+            >
+              <GitBranchPlus className="size-3.5" />
+              Commit to new branch…
+            </MenuItem>
           </>
         )}
       </Popover>
+      {branching ? <NewBranchDialog projectId={projectId} onClose={() => setBranching(false)} /> : null}
     </span>
+  );
+}
+
+/** Names the branch the uncommitted work moves to; committing and pushing it there makes Open PR the next step. */
+function NewBranchDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
+  const svc = useServices();
+  const queryClient = useQueryClient();
+  const [name, setName] = useState(() => branchName());
+  const commit = useMutation({
+    mutationFn: () => commitToNewBranch(svc, projectId, name),
+    onSuccess: async (message) => {
+      toast(message);
+      onClose();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["branch-pull"] }),
+        queryClient.invalidateQueries({ queryKey: ["runs", projectId] }),
+      ]);
+    },
+    onError: toastError,
+  });
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title="Commit to a new branch"
+      className="w-[440px]"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" loading={commit.isPending} disabled={!name.trim()} onClick={() => commit.mutate()}>
+            Commit & Push
+          </Button>
+        </>
+      }
+    >
+      <Field label="Branch">
+        {(id) => (
+          <Input
+            id={id}
+            value={name}
+            // oxlint-disable-next-line jsx-a11y/no-autofocus -- a modal's first focus; otherwise Enter lands on Close
+            autoFocus
+            className="font-mono"
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && name.trim() && commit.mutate()}
+          />
+        )}
+      </Field>
+    </Dialog>
   );
 }
 

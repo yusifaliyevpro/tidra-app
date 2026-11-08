@@ -1,20 +1,9 @@
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { cn } from "cn";
-import {
-  Bell,
-  Check,
-  CheckCheck,
-  CircleDot,
-  Eye,
-  GitPullRequest,
-  Inbox as InboxIcon,
-  MessageSquare,
-  Tag,
-  type LucideIcon,
-} from "lucide-react";
+import * as z from "@zod/mini";
+import { Bell, Check, CheckCheck, CircleDot, GitPullRequest, MessageSquare, Tag, type LucideIcon } from "lucide-react";
 import { useState } from "react";
-import { useInbox } from "@/app/queries";
+import { useBotPulls, useInbox } from "@/app/queries";
 import { useServices } from "@/app/services";
 import { useListKeys } from "@/app/shortcuts";
 import type { GitHubNotification } from "@/integrations/github";
@@ -24,13 +13,17 @@ import { clearNotifications, type PullSummary } from "@/services/github-feed";
 import { Badge } from "@/ui/badge";
 import { Button, IconButton } from "@/ui/button";
 import { openExternal } from "@/ui/external";
-import { Empty, Page } from "@/ui/layout";
+import { Chip, Empty, ErrorNote, Page } from "@/ui/layout";
 import { TimeAgo } from "@/ui/time";
-import { toast, toastError } from "@/ui/toast";
+import { toastError } from "@/ui/toast";
 
-export const Route = createFileRoute("/inbox")({ component: Inbox });
+const FILTERS = ["mine", "reviews", "bots", "unread"] as const;
+type Filter = (typeof FILTERS)[number];
 
-type Filter = "reviews" | "mine" | "unread";
+export const Route = createFileRoute("/inbox")({
+  validateSearch: z.object({ filter: z.optional(z.enum(FILTERS)) }),
+  component: Inbox,
+});
 
 /** API URLs in notifications point at api.github.com; this maps the common ones to their web pages. */
 function webUrl(apiUrl: string | null | undefined, repoUrl: string) {
@@ -47,68 +40,85 @@ const SUBJECT_ICON: Record<string, LucideIcon> = {
 
 function Inbox() {
   const { data } = useInbox();
-  const [filter, setFilter] = useState<Filter>("mine");
+  const { data: bots } = useBotPulls();
+  const search = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const filter = search.filter ?? "mine";
 
   if (data?.error) {
     return (
       <Page title="Pull requests">
         <Empty
-          icon={<InboxIcon />}
           title="GitHub isn't connected"
           action={
-            <Link to="/settings" search={{ section: "github" }} className="text-accent hover:underline">
-              Open GitHub settings
+            <Link to="/settings" search={{ section: "github" }}>
+              <Button variant="primary" size="sm" tabIndex={-1}>
+                Connect GitHub
+              </Button>
             </Link>
           }
-        >
-          {data.error}
-        </Empty>
+        />
       </Page>
     );
   }
 
   const reviews = data?.reviewRequests ?? [];
   const mine = data?.myPulls ?? [];
+  const botPulls = bots?.pulls ?? [];
   const unread = (data?.notifications ?? []).filter((n) => n.unread);
-  const filters: { id: Filter; label: string; icon: LucideIcon; count: number }[] = [
-    { id: "mine", label: "Your pull requests", icon: GitPullRequest, count: mine.length },
-    { id: "reviews", label: "Review requests", icon: Eye, count: reviews.length },
-    { id: "unread", label: "Notifications", icon: Bell, count: unread.length },
+  const filters: { id: Filter; label: string; count: number }[] = [
+    { id: "mine", label: "Yours", count: mine.length },
+    { id: "reviews", label: "Review requests", count: reviews.length },
+    { id: "bots", label: "Bots", count: botPulls.length },
+    { id: "unread", label: "Notifications", count: unread.length },
   ];
 
   return (
-    <Page title="Pull requests" actions={<JobRefresh jobId="inbox" />} className="flex overflow-hidden">
-      <nav className="flex w-56 shrink-0 flex-col gap-0.5 border-r border-line p-2">
-        {filters.map(({ id, label, icon: Icon, count }) => (
-          <button
-            key={id}
-            type="button"
-            aria-current={filter === id || undefined}
-            onClick={() => setFilter(id)}
-            className={cn(
-              "flex h-8 items-center gap-2.5 rounded-md px-2.5 text-left",
-              filter === id ? "bg-raised text-fg" : "text-muted hover:bg-hover hover:text-fg",
-            )}
-          >
-            <Icon className="size-4" />
-            <span className="flex-1">{label}</span>
-            {count > 0 ? <span className="text-xs text-faint tabular">{count}</span> : null}
-          </button>
-        ))}
-      </nav>
-      <div className="min-w-0 flex-1 overflow-y-auto">
-        {filter === "unread" ? (
-          <Notifications items={unread} />
-        ) : (
-          <Pulls
-            pulls={filter === "reviews" ? reviews : mine}
-            empty={filter === "reviews" ? "No reviews requested" : "No open pull requests"}
-            review={filter === "reviews"}
-          />
-        )}
-      </div>
+    <Page
+      title="Pull requests"
+      actions={<JobRefresh jobId={filter === "bots" ? "bot-pulls" : "inbox"} />}
+      toolbar={filters.map(({ id, label, count }) => (
+        <Chip
+          key={id}
+          active={filter === id}
+          count={count}
+          onClick={() => void navigate({ search: { filter: id === "mine" ? undefined : id }, replace: true })}
+        >
+          {label}
+        </Chip>
+      ))}
+    >
+      <InboxList filter={filter} pulls={{ mine, reviews, bots: botPulls }} unread={unread} botsError={bots?.error} />
     </Page>
   );
+}
+
+const EMPTY: Record<Exclude<Filter, "unread">, string> = {
+  mine: "No open pull requests",
+  reviews: "No reviews requested",
+  bots: "No open bot pull requests",
+};
+
+function InboxList({
+  filter,
+  pulls,
+  unread,
+  botsError,
+}: {
+  filter: Filter;
+  pulls: Record<Exclude<Filter, "unread">, PullSummary[]>;
+  unread: GitHubNotification[];
+  botsError: string | undefined;
+}) {
+  if (filter === "unread") return <Notifications items={unread} />;
+  if (filter === "bots" && botsError) {
+    return (
+      <div className="p-5">
+        <ErrorNote>{botsError}</ErrorNote>
+      </div>
+    );
+  }
+  return <Pulls pulls={pulls[filter]} empty={EMPTY[filter]} review={filter === "reviews"} />;
 }
 
 function Pulls({ pulls, empty, review }: { pulls: PullSummary[]; empty: string; review: boolean }) {
@@ -127,7 +137,7 @@ function Pulls({ pulls, empty, review }: { pulls: PullSummary[]; empty: string; 
           key={pull.url}
           data-row-id={pull.url}
           data-selected={selected === pull.url || undefined}
-          className="group flex h-14 items-center gap-3 border-b border-line px-5 hover:bg-hover data-selected:bg-raised"
+          className="group flex h-12 items-center gap-3 border-b border-line px-5 hover:bg-hover data-selected:bg-selected"
         >
           <ChecksIcon state={pull.checks} />
           <button
@@ -166,10 +176,6 @@ function Notifications({ items }: { items: GitHubNotification[] }) {
   const [selected, setSelected] = useState<string>();
   const clear = useMutation({
     mutationFn: ({ ids, done }: { ids: string[] | "all"; done?: boolean }) => clearNotifications(svc, ids, done),
-    onSuccess: (_, { ids, done }) => {
-      if (ids === "all") toast("Marked all as read.");
-      else if (done) toast("Marked as done.");
-    },
     onError: toastError,
   });
   const open = (n: GitHubNotification) => {
@@ -209,7 +215,7 @@ function Notifications({ items }: { items: GitHubNotification[] }) {
             key={n.id}
             data-row-id={n.id}
             data-selected={selected === n.id || undefined}
-            className="flex h-14 items-center gap-3 border-b border-line px-5 hover:bg-hover data-selected:bg-raised"
+            className="flex h-12 items-center gap-3 border-b border-line px-5 hover:bg-hover data-selected:bg-selected"
           >
             <Icon className="size-4 shrink-0 text-muted" />
             <button type="button" onClick={() => open(n)} className="flex min-w-0 flex-1 flex-col text-left">

@@ -1,5 +1,5 @@
 import { cn } from "cn";
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 /**
@@ -73,7 +73,8 @@ export function Popover({
                   : { top: position.top, left: position.left }
               }
               className={cn(
-                "fixed z-50 flex max-h-[min(420px,70vh)] flex-col overflow-hidden overscroll-contain rounded-lg border border-line-strong bg-raised shadow-xl shadow-black/40",
+                "fixed z-50 flex max-h-[min(420px,70vh)] animate-pop-in flex-col overflow-hidden overscroll-contain rounded-lg border border-line-strong bg-raised shadow-pop",
+                align === "end" ? "origin-top-right" : "origin-top-left",
                 className,
               )}
             >
@@ -106,12 +107,69 @@ export function MenuItem({
       disabled={disabled}
       onClick={onSelect}
       className={cn(
-        "flex h-8 w-full shrink-0 items-center gap-2 rounded-md px-2 text-left text-base text-muted hover:bg-hover hover:text-fg focus-visible:bg-hover focus-visible:text-fg focus-visible:outline-none disabled:opacity-50",
-        active && "text-fg",
+        "flex h-[30px] w-full shrink-0 items-center gap-2 rounded-md px-2 text-left text-base text-fg hover:bg-hover focus-visible:bg-hover focus-visible:outline-none disabled:opacity-45 [&>svg]:text-muted",
+        active && "bg-selected",
         className,
       )}
     >
       {children}
     </button>
   );
+}
+
+/** A menu at the pointer for a right click; closes like a popover. Items call `onClose` themselves after acting. */
+export function ContextMenu({
+  at,
+  onClose,
+  children,
+}: {
+  at: { x: number; y: number } | undefined;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const panel = useRef<HTMLDivElement>(null);
+  const close = useEffectEvent(onClose);
+  const open = Boolean(at);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onPointer = (event: PointerEvent) => {
+      if (!(event.target instanceof Node && panel.current?.contains(event.target))) close();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        close();
+      }
+    };
+    const onAway = () => close();
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("scroll", onAway, true);
+    window.addEventListener("resize", onAway);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("scroll", onAway, true);
+      window.removeEventListener("resize", onAway);
+    };
+  }, [open]);
+  if (!at) return null;
+  // Keeps the menu inside the window near the right and bottom edges.
+  const left = Math.min(at.x, window.innerWidth - 232);
+  const top = Math.min(at.y, window.innerHeight - 280);
+  return createPortal(
+    <div
+      ref={panel}
+      role="menu"
+      style={{ left, top }}
+      className="fixed z-50 flex w-[220px] origin-top-left animate-pop-in flex-col rounded-lg border border-line-strong bg-raised p-1 shadow-pop"
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+export function MenuSeparator() {
+  return <div className="-mx-1 my-1 h-px bg-line" />;
 }

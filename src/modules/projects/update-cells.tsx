@@ -13,7 +13,7 @@ export function UpdateHeader() {
 
 function Cell({ value, color, label }: { value: number; color: string; label: string }) {
   return (
-    <span title={`${value} ${label}`} className={cn("w-12 tabular", value > 0 ? color : "text-white/15")}>
+    <span title={`${value} ${label}`} className={cn("w-12 tabular", value > 0 ? color : "text-ghost")}>
       {value}
     </span>
   );

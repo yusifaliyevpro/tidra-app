@@ -79,6 +79,21 @@ export async function commitAndPushProject(svc: Services, projectId: string): Pr
   return `Committed "${message}" and pushed ${branch}.`;
 }
 
+/**
+ * Moves the uncommitted work onto a new branch cut from HEAD, commits it there and publishes the branch, so the
+ * default branch stays untouched and Open PR can follow.
+ */
+export async function commitToNewBranch(svc: Services, projectId: string, branch: string): Promise<string> {
+  const name = branch.trim();
+  if (!name) throw new Error("Name the branch first.");
+  const { root } = await checkoutOf(svc, projectId);
+  await createGit(svc.io, root).switchCreate(name);
+  const message = await commitChanges(svc, projectId);
+  await pushBranch(svc, projectId);
+  await refreshRepo(svc, projectId);
+  return `Committed "${message}" on ${name} and pushed it.`;
+}
+
 /** Pushes the current branch to origin, setting it as upstream. */
 export async function pushProject(svc: Services, projectId: string): Promise<string> {
   const branch = await pushBranch(svc, projectId);
@@ -145,32 +160,6 @@ export async function branchPull(
   const pull = await pullFor(svc, await pullTarget(svc, project.path, project.remote), branch);
   if (pull.state === "open") return { state: "open", url: pull.url, number: pull.number, title: pull.title };
   return pull.state === "none" ? pull : { state: pull.state, url: pull.url };
-}
-
-/**
- * Where the next update goes. An update branch whose pull request is still open (or not opened yet) keeps
- * collecting updates; once that PR is merged or closed, the update starts fresh from the default branch.
- */
-export async function updateBranchPlan(
-  svc: Services,
-  project: { path: string; remote: string | null; updateOnBranch: boolean },
-  newBranch: string,
-): Promise<{ branch?: string }> {
-  if (!project.updateOnBranch) return {};
-  const git = createGit(svc.io, project.path);
-  const status = await git.status();
-  if (!isUpdateBranch(status.branch) || !status.branch) return { branch: newBranch };
-
-  const target = await pullTarget(svc, project.path, project.remote);
-  const pull = await pullFor(svc, target, status.branch).catch((): PullState => ({ state: "none" }));
-  if (pull.state === "open" || pull.state === "none") return {};
-
-  // Leaving with local changes would carry them along; the update's own preflight reports them instead.
-  if (!isClean(status)) return {};
-  const base = (await git.defaultBranch()) ?? "main";
-  await git.switchTo(base);
-  await git.pull().catch(() => undefined);
-  return { branch: newBranch };
 }
 
 /** Commit messages on HEAD that the target's default branch doesn't have, oldest first. */

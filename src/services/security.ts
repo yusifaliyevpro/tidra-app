@@ -1,4 +1,6 @@
 import * as z from "@zod/mini";
+import { inArray } from "drizzle-orm";
+import { dismissals } from "@/core/db/schema";
 import {
   batchQueries,
   OSV_BATCH_LIMIT,
@@ -132,4 +134,27 @@ export async function scanAllProjects(svc: Services, signal?: AbortSignal): Prom
   const projects = await svc.store.listProjects();
   await Promise.all(projects.map((p) => limit(async () => (signal?.aborted ? undefined : scanProject(svc, p.id)))));
   await svc.queryClient.invalidateQueries({ queryKey: ["security"] });
+}
+
+/** Hides advisories in every project and, through sync, on every device. */
+export async function dismissAdvisories(svc: Services, ids: string[], reason: string) {
+  await Promise.all(
+    [...new Set(ids)].map((id) => {
+      const stamp = { hlc: svc.clock.tick(), deviceId: svc.clock.deviceId };
+      return svc.store.db
+        .insert(dismissals)
+        .values({ id, target: id, reason, ...stamp })
+        .onConflictDoUpdate({ target: dismissals.id, set: { deleted: false, reason, ...stamp } });
+    }),
+  );
+}
+
+/** Undoes a dismissal; the row stays as a tombstone so the change syncs. */
+export async function restoreAdvisories(svc: Services, ids: string[]) {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return;
+  await svc.store.db
+    .update(dismissals)
+    .set({ deleted: true, hlc: svc.clock.tick(), deviceId: svc.clock.deviceId })
+    .where(inArray(dismissals.id, unique));
 }

@@ -1,53 +1,50 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import {
-  ArrowDown,
-  ArrowUp,
-  CircleCheck,
-  FolderGit2,
-  GitPullRequest,
-  Pencil,
-  Play,
-  RefreshCw,
-  ShieldAlert,
-  Activity as ActivityIcon,
-  type LucideIcon,
-} from "lucide-react";
+import { ArrowUp, CircleX, GitPullRequest, Pencil, Rocket, Tag, RefreshCw } from "lucide-react";
 import type { ReactNode } from "react";
 import { useHome, useJobs } from "@/app/queries";
 import { useServices } from "@/app/services";
 import { GitHubLimit } from "@/modules/github-limit";
-import { projectLink } from "@/modules/links";
-import { UpdateCells, UpdateHeader } from "@/modules/projects/update-cells";
-import type { CiState, HomeSummary, ProjectHealth } from "@/services/home";
-import { Button, IconButton } from "@/ui/button";
+import type { HomeSummary } from "@/services/home";
+import { homeTasks, type HomeTask, type TaskTarget } from "@/services/home-tasks";
+import { Button } from "@/ui/button";
 import { ErrorBoundary } from "@/ui/error-boundary";
 import { openExternal } from "@/ui/external";
-import { Page } from "@/ui/layout";
-import { Legend, SegmentBar, type Segment } from "@/ui/meter";
+import { Empty, Page } from "@/ui/layout";
+import { SegmentBar, type Segment } from "@/ui/meter";
+import { StatusGlyph } from "@/ui/status-glyph";
 import { TimeAgo } from "@/ui/time";
 import { toastError } from "@/ui/toast";
 
 export const Route = createFileRoute("/")({ component: Home });
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
 function Home() {
   const { data: home } = useHome();
   return (
     <Page
-      title="Overview"
-      subtitle={home ? plural(home.projects, "project") : undefined}
+      title="Home"
       actions={
         <>
           <GitHubLimit className="mr-1 text-xs text-faint" />
+          <LastChecked />
           <CheckAll />
         </>
       }
     >
       {home ? <Dashboard home={home} /> : <DashboardSkeleton />}
     </Page>
+  );
+}
+
+function LastChecked() {
+  const { data: jobs = [] } = useJobs();
+  const last = Math.max(0, ...jobs.map((j) => j.lastRun ?? 0));
+  if (last === 0) return null;
+  return (
+    <span className="mr-1 text-sm text-faint">
+      Checked <TimeAgo value={last} />
+    </span>
   );
 }
 
@@ -65,397 +62,188 @@ function CheckAll() {
   const busy = run.isPending || jobs.some((j) => j.running);
   return (
     <Button size="sm" icon={<RefreshCw className="size-3.5" />} loading={busy} onClick={() => run.mutate()}>
-      Check everything
+      Check all
     </Button>
   );
 }
 
 function Dashboard({ home }: { home: HomeSummary }) {
+  if (home.projects === 0) {
+    return (
+      <Empty
+        title="No projects"
+        action={
+          <Link to="/projects" className="text-accent-text hover:underline">
+            Add projects
+          </Link>
+        }
+      />
+    );
+  }
+  const tasks = homeTasks(home);
   return (
-    <div className="mx-auto flex max-w-[1180px] flex-col gap-5 p-6">
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <ErrorBoundary>
-          <UpdatesTile home={home} />
-        </ErrorBoundary>
-        <ErrorBoundary>
-          <SecurityTile home={home} />
-        </ErrorBoundary>
-        <ErrorBoundary>
-          <CiTile home={home} />
-        </ErrorBoundary>
-        <ErrorBoundary>
-          <PullsTile home={home} />
-        </ErrorBoundary>
-      </div>
-      <div className="grid grid-cols-[minmax(0,1fr)_320px] items-start gap-5">
-        <ErrorBoundary>
-          <AttentionTable health={home.health} total={home.projects} />
-        </ErrorBoundary>
-        <div className="flex flex-col gap-5">
-          <ErrorBoundary>
-            <Releases releases={home.releases} />
-          </ErrorBoundary>
-          <ErrorBoundary>
-            <BackgroundJobs />
-          </ErrorBoundary>
-        </div>
-      </div>
+    <div className="mx-auto flex max-w-[1080px] flex-col gap-8 px-7 py-6">
+      <ErrorBoundary>
+        <Summary home={home} />
+      </ErrorBoundary>
+      <ErrorBoundary>{tasks.length > 0 ? <Tasks tasks={tasks} /> : <AllClear />}</ErrorBoundary>
     </div>
   );
 }
 
-function Tile({
+function Figure({
   to,
-  icon: Icon,
   label,
   value,
   tone,
   children,
 }: {
-  to: "/projects" | "/security" | "/ci" | "/inbox";
-  icon: LucideIcon;
+  to: "/projects" | "/security" | "/repos" | "/inbox";
   label: string;
-  value: ReactNode;
-  tone?: "bad" | "warn" | "ok";
-  children: ReactNode;
+  value: number;
+  tone?: "bad";
+  children?: ReactNode;
 }) {
   return (
     <Link
       to={to}
-      className="flex min-h-[132px] flex-col gap-3 rounded-lg border border-line bg-surface p-4 transition-colors hover:border-line-strong hover:bg-raised"
+      className="flex flex-col gap-1.5 border-l border-line px-4 py-3.5 transition-colors duration-[80ms] first:border-l-0 hover:bg-hover"
     >
-      <span className="flex items-center gap-2 text-sm text-muted">
-        <Icon className="size-4 text-faint" strokeWidth={1.5} />
-        {label}
-      </span>
+      <span className="text-sm text-muted">{label}</span>
       <span
         className={cn(
-          "text-2xl font-semibold tabular",
-          tone === "bad" ? "text-bad" : tone === "warn" ? "text-warn" : tone === "ok" ? "text-ok" : "text-fg",
+          "text-xl font-medium tracking-[-0.01em] tabular",
+          value === 0 ? "text-ghost" : tone === "bad" ? "text-bad" : "text-fg",
         )}
       >
         {value}
       </span>
-      <div className="mt-auto flex flex-col gap-2">{children}</div>
+      <span className="h-1">{value > 0 ? children : null}</span>
     </Link>
   );
 }
 
-function UpdatesTile({ home }: { home: HomeSummary }) {
-  const { major, minor, patch, projects } = home.updates;
-  const segments: Segment[] = [
+function Summary({ home }: { home: HomeSummary }) {
+  const { major, minor, patch } = home.updates;
+  const s = home.security.bySeverity;
+  const updates: Segment[] = [
     { value: major, color: "bg-bad", label: "major" },
     { value: minor, color: "bg-warn", label: "minor" },
     { value: patch, color: "bg-ok", label: "patch" },
   ];
-  const total = major + minor + patch;
-  return (
-    <Tile
-      to="/projects"
-      icon={FolderGit2}
-      label="Outdated packages"
-      value={total}
-      tone={total === 0 ? "ok" : undefined}
-    >
-      {total > 0 ? (
-        <>
-          <SegmentBar segments={segments} />
-          <Legend segments={segments} />
-        </>
-      ) : (
-        <span className="text-xs text-muted">Every project is up to date</span>
-      )}
-      {total > 0 ? <span className="sr-only">{plural(projects, "project")}</span> : null}
-    </Tile>
-  );
-}
-
-function SecurityTile({ home }: { home: HomeSummary }) {
-  const s = home.security.bySeverity;
-  const segments: Segment[] = [
-    { value: s.critical + s.high, color: "bg-bad", label: "high" },
+  const advisories: Segment[] = [
+    { value: s.critical + s.high, color: "bg-bad", label: "high or critical" },
     { value: s.moderate, color: "bg-warn", label: "moderate" },
-    { value: s.low, color: "bg-faint", label: "low" },
+    { value: s.low, color: "bg-ghost", label: "low" },
   ];
   return (
-    <Tile
-      to="/security"
-      icon={ShieldAlert}
-      label="Advisories"
-      value={home.security.total}
-      tone={s.critical + s.high > 0 ? "bad" : home.security.total === 0 ? "ok" : "warn"}
-    >
-      {home.security.total > 0 ? (
-        <>
-          <SegmentBar segments={segments} />
-          <Legend segments={segments} />
-        </>
-      ) : (
-        <span className="text-xs text-muted">No known advisories</span>
-      )}
-    </Tile>
+    <div className="grid grid-cols-4 overflow-hidden rounded-lg border border-line bg-surface">
+      <Figure to="/projects" label="Outdated" value={major + minor + patch}>
+        <SegmentBar segments={updates} />
+      </Figure>
+      <Figure
+        to="/security"
+        label="Advisories"
+        value={home.security.total}
+        tone={s.critical + s.high > 0 ? "bad" : undefined}
+      >
+        <SegmentBar segments={advisories} />
+      </Figure>
+      <Figure to="/repos" label="CI failing" value={home.ci.failing.length} tone="bad" />
+      <Figure to="/inbox" label="Review requests" value={home.reviewRequests} />
+    </div>
   );
 }
 
-const CI_DOT: Record<CiState, string> = {
-  success: "bg-ok",
-  failure: "bg-bad",
-  pending: "bg-warn",
-  none: "bg-white/10",
-};
+const ICON = "size-3.5 shrink-0";
 
-function CiTile({ home }: { home: HomeSummary }) {
-  const repos = home.ci.repos.filter((r) => r.state !== "none");
-  const failing = repos.filter((r) => r.state === "failure").length;
-  return (
-    <Tile
-      to="/ci"
-      icon={ActivityIcon}
-      label="CI on default branch"
-      value={repos.length === 0 ? "—" : failing > 0 ? `${failing} failing` : "Passing"}
-      tone={failing > 0 ? "bad" : repos.length > 0 ? "ok" : undefined}
-    >
-      <span className="flex flex-wrap gap-1">
-        {repos.map((r) => (
-          <span key={r.repo} title={`${r.name}: ${r.state}`} className={cn("size-2.5 rounded-sm", CI_DOT[r.state])} />
-        ))}
-      </span>
-      <span className="truncate text-xs text-muted">
-        {repos.length === 0
-          ? "No GitHub Actions runs yet"
-          : failing > 0
-            ? repos
-                .filter((r) => r.state === "failure")
-                .map((r) => r.name)
-                .join(", ")
-            : `${repos.length} repos green`}
-      </span>
-    </Tile>
-  );
+function TaskIcon({ kind }: { kind: HomeTask["kind"] }) {
+  if (kind === "advisory") return <StatusGlyph status="alert" />;
+  if (kind === "major") return <StatusGlyph status="major" />;
+  if (kind === "minor") return <StatusGlyph status="minor" />;
+  if (kind === "ci" || kind === "pulls-failing") return <CircleX className={cn(ICON, "text-bad")} strokeWidth={1.75} />;
+  if (kind === "deploy") return <Rocket className={cn(ICON, "text-bad")} strokeWidth={1.75} />;
+  if (kind === "review") return <GitPullRequest className={cn(ICON, "text-accent-text")} strokeWidth={1.75} />;
+  if (kind === "uncommitted") return <Pencil className={cn(ICON, "text-warn")} strokeWidth={1.75} />;
+  if (kind === "unpushed") return <ArrowUp className={cn(ICON, "text-info")} strokeWidth={1.75} />;
+  return <Tag className={cn(ICON, "text-muted")} strokeWidth={1.75} />;
 }
 
-function PullsTile({ home }: { home: HomeSummary }) {
-  const rows = [
-    { label: "Yours", value: home.myPulls, bad: home.myPullsFailing },
-    { label: "Review requests", value: home.reviewRequests },
-    { label: "Bot PRs", value: home.botPulls },
-  ];
+function useOpenTarget() {
+  const navigate = useNavigate();
+  return (target: TaskTarget) => {
+    if (target.kind === "url") openExternal(target.url);
+    else if (target.kind === "security") void navigate({ to: "/security", search: { project: target.projectId } });
+    else if (target.kind === "project")
+      void navigate({
+        to: "/projects/$projectId",
+        params: { projectId: target.projectId },
+        search: { tab: target.tab },
+      });
+    else if (target.kind === "projects") void navigate({ to: "/projects", search: { filter: target.filter } });
+    else if (target.kind === "inbox") void navigate({ to: "/inbox" });
+    else void navigate({ to: "/changelogs" });
+  };
+}
+
+function Tasks({ tasks }: { tasks: HomeTask[] }) {
+  const open = useOpenTarget();
   return (
-    <Tile to="/inbox" icon={GitPullRequest} label="Pull requests" value={home.myPulls + home.reviewRequests}>
-      <span className="flex flex-col gap-1 text-xs">
-        {rows.map((row) => (
-          <span key={row.label} className="flex items-center justify-between text-muted">
-            {row.label}
-            <span className="tabular">
-              {row.bad ? <span className="mr-2 text-bad">{row.bad} failing</span> : null}
-              <span className="text-fg">{row.value}</span>
+    <section className="flex flex-col">
+      <h2 className="flex items-center gap-2 pb-2 text-sm font-medium text-muted">
+        Needs you <span className="font-normal text-faint tabular">{tasks.length}</span>
+      </h2>
+      <div className="border-t border-line">
+        {tasks.map((task, index) => (
+          <div
+            key={task.key}
+            className="group flex h-9 items-center gap-2.5 border-b border-line pr-1 pl-2 transition-colors duration-[80ms] hover:bg-hover"
+          >
+            <span className="flex size-4 items-center justify-center">
+              <TaskIcon kind={task.kind} />
             </span>
-          </span>
+            <span className="min-w-0 truncate">
+              {task.title[0]}
+              <span className="font-medium">{task.title[1]}</span>
+              {task.title[2]}
+            </span>
+            {task.detail ? <span className="min-w-0 truncate text-sm text-faint">{task.detail}</span> : null}
+            <Button
+              size="sm"
+              variant={index === 0 ? "primary" : "secondary"}
+              className="ml-auto"
+              onClick={() => open(task.target)}
+            >
+              {task.action}
+            </Button>
+          </div>
         ))}
-      </span>
-    </Tile>
-  );
-}
-
-function Panel({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
-  return (
-    <section className="flex min-w-0 flex-col overflow-hidden rounded-lg border border-line bg-surface">
-      <header className="flex h-10 shrink-0 items-center justify-between border-b border-line px-4">
-        <h2 className="text-sm font-medium">{title}</h2>
-        {action}
-      </header>
-      {children}
+      </div>
     </section>
   );
 }
 
-function AttentionTable({ health, total }: { health: ProjectHealth[]; total: number }) {
-  const navigate = useNavigate();
-  const rows = health.filter((h) => h.score > 0).slice(0, 12);
+function AllClear() {
   return (
-    <Panel
-      title="Needs attention"
-      action={
-        <Link to="/projects" className="text-xs text-muted hover:text-fg">
-          All {total} projects
-        </Link>
-      }
-    >
-      {rows.length === 0 ? (
-        <div className="flex h-24 items-center justify-center gap-2 text-muted">
-          <CircleCheck className="size-4 text-ok" />
-          All clear
-        </div>
-      ) : (
-        <table className="w-full table-fixed text-left">
-          <thead className="text-xs text-faint">
-            <tr className="h-8 border-b border-line">
-              <th className="pl-4 font-normal">Project</th>
-              <th className="w-[200px] font-normal">
-                <UpdateHeader />
-              </th>
-              <th className="w-[96px] font-normal">Advisories</th>
-              <th className="w-[150px] pr-4 font-normal">Git</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((h) => (
-              <tr
-                key={h.id}
-                onClick={() => void navigate(projectLink(h.id))}
-                className="h-11 border-b border-line last:border-b-0 hover:bg-hover"
-              >
-                <td className="pl-4">
-                  <Link {...projectLink(h.id)} className="flex min-w-0 items-center gap-2">
-                    {h.ci !== "none" ? (
-                      <span title={`CI ${h.ci}`} className={cn("size-1.5 shrink-0 rounded-full", CI_DOT[h.ci])} />
-                    ) : (
-                      <span className="size-1.5 shrink-0" />
-                    )}
-                    <span className="truncate font-medium">{h.name}</span>
-                    {h.repo ? <span className="truncate text-xs text-faint">{h.repo}</span> : null}
-                  </Link>
-                </td>
-                <td>
-                  <UpdateCells updates={h.updates} />
-                </td>
-                <td>
-                  <SecurityCell health={h} />
-                </td>
-                <td className="pr-4">
-                  <GitCell health={h} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </Panel>
-  );
-}
-
-function SecurityCell({ health }: { health: ProjectHealth }) {
-  const { security } = health;
-  if (security.total === 0) return <span className="text-sm text-white/15">0</span>;
-  const urgent = security.critical + security.high;
-  return (
-    <span
-      className={cn("text-sm tabular", urgent > 0 ? "text-bad" : "text-warn")}
-      title={`${security.critical} critical, ${security.high} high, ${security.moderate} moderate, ${security.low} low`}
-    >
-      {security.total}
-    </span>
-  );
-}
-
-function GitCell({ health }: { health: ProjectHealth }) {
-  if (!health.branch) return <span className="text-sm text-faint">{health.error ? "Error" : "No git"}</span>;
-  return (
-    <span className="flex min-w-0 items-center gap-2 text-xs text-muted">
-      <span className="truncate font-mono">{health.branch}</span>
-      {health.changed > 0 ? (
-        <span className="flex shrink-0 items-center gap-0.5 text-warn">
-          {health.changed}
-          <Pencil className="size-3" strokeWidth={1.5} />
-        </span>
-      ) : null}
-      {health.ahead > 0 ? (
-        <span className="flex shrink-0 items-center text-info">
-          <ArrowUp className="size-3" />
-          {health.ahead}
-        </span>
-      ) : null}
-      {health.behind > 0 ? (
-        <span className="flex shrink-0 items-center">
-          <ArrowDown className="size-3" />
-          {health.behind}
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
-function Releases({ releases }: { releases: HomeSummary["releases"] }) {
-  return (
-    <Panel
-      title="New releases"
-      action={
-        <Link to="/changelogs" className="text-xs text-muted hover:text-fg">
-          Changelogs
-        </Link>
-      }
-    >
-      {releases.length === 0 ? (
-        <p className="px-4 py-4 text-sm text-muted">Watch packages in Changelogs to follow their releases</p>
-      ) : (
-        releases.slice(0, 5).map((r) => (
-          <button
-            key={`${r.repo}@${r.tag}`}
-            type="button"
-            onClick={() => r.url && openExternal(r.url)}
-            className="flex h-10 w-full items-center gap-2 border-b border-line px-4 text-left last:border-b-0 hover:bg-hover"
-          >
-            <span className="min-w-0 flex-1 truncate text-sm">{r.packageName ?? r.repo}</span>
-            <span className={cn("shrink-0 font-mono text-xs", r.major ? "text-bad" : "text-muted")}>{r.tag}</span>
-            <span className="w-16 shrink-0 text-right text-xs">
-              <TimeAgo value={r.publishedAt} />
-            </span>
-          </button>
-        ))
-      )}
-    </Panel>
-  );
-}
-
-function BackgroundJobs() {
-  const svc = useServices();
-  const queryClient = useQueryClient();
-  const { data: jobs = [] } = useJobs();
-  const run = useMutation({
-    mutationFn: async (id: string) => {
-      await svc.scheduler.runNow(id);
-      await queryClient.invalidateQueries();
-    },
-    onError: toastError,
-  });
-  return (
-    <Panel title="Background checks">
-      {jobs.map((job) => (
-        <div key={job.id} className="flex h-9 items-center gap-2 border-b border-line pr-2 pl-4 last:border-b-0">
-          <span className="min-w-0 flex-1 truncate text-sm text-muted" title={job.lastError ?? job.title}>
-            {job.title}
-          </span>
-          {job.lastError ? (
-            <span className="text-xs text-bad" title={job.lastError}>
-              Failed
-            </span>
-          ) : job.lastRun ? (
-            <span className="text-xs">
-              <TimeAgo value={job.lastRun} />
-            </span>
-          ) : null}
-          <IconButton
-            size="sm"
-            label={`Run ${job.title} now`}
-            loading={job.running || (run.isPending && run.variables === job.id)}
-            icon={<Play className="size-3" />}
-            onClick={() => run.mutate(job.id)}
-          />
-        </div>
-      ))}
-    </Panel>
+    <div className="flex h-24 items-center justify-center gap-2">
+      <StatusGlyph status="ok" />
+      All clear
+    </div>
   );
 }
 
 function DashboardSkeleton() {
   return (
-    <div className="mx-auto flex max-w-[1180px] appear-late flex-col gap-5 p-6">
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        {["a", "b", "c", "d"].map((k) => (
-          <div key={k} className="h-[132px] rounded-lg border border-line bg-surface" />
+    <div className="mx-auto flex max-w-[1080px] appear-late flex-col gap-8 px-7 py-6">
+      <div className="h-[92px] rounded-lg border border-line bg-surface" />
+      <div className="flex flex-col">
+        {[64, 48, 56, 40, 52].map((w) => (
+          <div key={w} className="flex h-9 items-center gap-2.5 border-b border-line pl-2">
+            <span className="size-3.5 rounded-full bg-selected" />
+            <span className="h-2.5 rounded-sm bg-selected" style={{ width: `${w}%` }} />
+          </div>
         ))}
       </div>
-      <div className="h-80 rounded-lg border border-line bg-surface" />
     </div>
   );
 }

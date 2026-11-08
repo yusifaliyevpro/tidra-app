@@ -230,6 +230,8 @@ export function createGit(io: Io, cwd: string) {
         .map((message) => message.trim())
         .filter(Boolean),
     pushCurrent: () => run(["push"], { signal: AbortSignal.timeout(PUSH_LIMIT_MS) }),
+    /** Tracked files that differ from HEAD, relative to this folder. */
+    changedPaths: async () => (await run(["diff", "--name-only", "--relative", "HEAD"])).split(/\r?\n/).filter(Boolean),
     /** One path at a time: git rejects the whole list when any path is untracked (a gitignored lockfile). */
     restore: async (paths: string[]) => {
       for (const path of paths) {

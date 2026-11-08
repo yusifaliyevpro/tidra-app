@@ -149,6 +149,20 @@ describe("scheduler at launch", () => {
 });
 
 describe("scheduler extras", () => {
+  it("applies a new interval without a restart", async () => {
+    const run = vi.fn<() => Promise<void>>().mockResolvedValue();
+    const scheduler = createScheduler({ random: () => 0, tickMs: 1000 });
+    scheduler.register({ id: "outdated", title: "Outdated", intervalMinutes: 60, run });
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(run).toHaveBeenCalledTimes(1);
+
+    scheduler.setInterval("outdated", 5);
+    await vi.advanceTimersByTimeAsync(minutes(5) + 1000);
+    expect(run).toHaveBeenCalledTimes(2);
+    scheduler.stop();
+  });
+
   it("runs every job once for runAll and records failures without throwing", async () => {
     const ok = vi.fn<() => Promise<void>>().mockResolvedValue();
     const scheduler = createScheduler({ random: () => 0 });

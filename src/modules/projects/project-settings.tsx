@@ -7,7 +7,7 @@ import { DEFAULT_MAJOR_PINS } from "@/engine/outdated";
 import { SettingRow, SettingsGroup } from "@/modules/settings/rows";
 import { refreshProject } from "@/services/projects";
 import { Button } from "@/ui/button";
-import { Field, Input, Switch, Textarea } from "@/ui/field";
+import { Field, Input, Textarea } from "@/ui/field";
 import { toast, toastError } from "@/ui/toast";
 
 const lines = (text: string) =>
@@ -23,14 +23,6 @@ export function ProjectSettings({ project, detectedChecks }: { project: ProjectW
   const [checks, setChecks] = useState(() => (project.checks ?? []).join("\n"));
   const [pins, setPins] = useState(() => (project.majorPins ?? DEFAULT_MAJOR_PINS).join("\n"));
   const [path, setPath] = useState(project.path ?? "");
-
-  const save = useMutation({
-    mutationFn: async (patch: Parameters<typeof svc.store.updateProject>[1]) => {
-      await svc.store.updateProject(project.id, patch);
-      await queryClient.invalidateQueries({ queryKey: ["project", project.id] });
-    },
-    onError: toastError,
-  });
 
   const saveForm = useMutation({
     mutationFn: async () => {
@@ -56,16 +48,6 @@ export function ProjectSettings({ project, detectedChecks }: { project: ProjectW
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
-      <SettingsGroup title="Updates">
-        <SettingRow label="Update on a new branch" description="tidra/deps-<date>">
-          <Switch
-            label="Update on a new branch"
-            checked={project.updateOnBranch}
-            onChange={(updateOnBranch) => save.mutate({ updateOnBranch })}
-          />
-        </SettingRow>
-      </SettingsGroup>
-
       <SettingsGroup title="Checks and versions">
         <div className="flex flex-col gap-4 p-4">
           <Field label="Check commands" hint={`One per line. Empty uses ${detectedChecks.join(", ") || "none"}.`}>

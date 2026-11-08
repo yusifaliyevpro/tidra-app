@@ -1,18 +1,18 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import * as z from "@zod/mini";
 import { cn } from "cn";
-import { ChevronRight, ShieldCheck } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { useSecurity } from "@/app/queries";
 import { useServices } from "@/app/services";
 import { useListKeys } from "@/app/shortcuts";
-import { dismissals } from "@/core/db/schema";
 import { groupFindings, severityRank, wouldFailCi, type Finding, type FindingGroup } from "@/engine/advisories";
 import { JobRefresh } from "@/modules/common";
 import { projectLink } from "@/modules/links";
 import { UpdateRunDialog } from "@/modules/projects/update-run";
 import { fixDirect, fixWithOverride } from "@/modules/security/fix";
+import { dismissAdvisories, restoreAdvisories } from "@/services/security";
 import { SeverityBadge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { Dialog } from "@/ui/dialog";
@@ -23,7 +23,7 @@ import { ExternalLink } from "@/ui/markdown";
 import { SegmentBar } from "@/ui/meter";
 import { Mono } from "@/ui/misc";
 import { Spinner } from "@/ui/spinner";
-import { toast, toastError } from "@/ui/toast";
+import { toast, toastError, toastUndo } from "@/ui/toast";
 
 export const Route = createFileRoute("/security")({
   validateSearch: z.object({ project: z.optional(z.string()) }),
@@ -65,20 +65,13 @@ function Security() {
 
   const threshold = data?.threshold;
   return (
-    <Page
-      title="Security"
-      subtitle={
-        threshold ? `Audit fails at ${threshold.level}${threshold.prodOnly ? ", production only" : ""}` : undefined
-      }
-      actions={<JobRefresh jobId="security" label="Scan again" />}
-      className="overflow-hidden"
-    >
+    <Page title="Security" actions={<JobRefresh jobId="security" label="Scan again" />} className="overflow-hidden">
       {isPending ? (
         <div className="flex justify-center p-10">
           <Spinner />
         </div>
       ) : rows.length === 0 ? (
-        <Empty icon={<ShieldCheck />} title="No known advisories" />
+        <Empty title="No known advisories" />
       ) : (
         <Split
           listWidth={300}
@@ -128,7 +121,7 @@ function ProjectItem({
       onClick={onSelect}
       className={cn(
         "flex w-full flex-col gap-2 border-b border-line px-4 py-3 text-left transition-colors hover:bg-hover",
-        selected && "bg-raised",
+        selected && "bg-selected",
       )}
     >
       <span className="flex items-center gap-2">
@@ -142,8 +135,8 @@ function ProjectItem({
           { value: count(findings, "low"), color: "bg-faint", label: "low" },
         ]}
       />
-      <span className="text-xs text-faint">
-        {row.report?.error ? "Scan failed" : failsAudit ? "Fails the audit" : "Passes the audit"}
+      <span className={cn("text-xs", row.report?.error || failsAudit ? "text-bad" : "text-faint")}>
+        {row.report?.error ? "Scan failed" : failsAudit ? "Fails CI" : null}
       </span>
     </button>
   );
@@ -152,6 +145,7 @@ function ProjectItem({
 function ProjectAdvisories({ row }: { row: ProjectFindings }) {
   const svc = useServices();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [run, setRun] = useState<string>();
   const [dismissing, setDismissing] = useState<Finding[]>();
   const groups = groupFindings(row.findings);
@@ -168,7 +162,11 @@ function ProjectAdvisories({ row }: { row: ProjectFindings }) {
     },
     onSuccess: async (runId) => {
       if (runId) setRun(runId);
-      else toast("Override added and installed. Commit it from the project page.");
+      else
+        toast("Override added and installed.", "info", {
+          label: "Open project",
+          run: () => void navigate(projectLink(projectId)),
+        });
       await queryClient.invalidateQueries({ queryKey: ["security"] });
       svc.invalidate(["home"]);
     },
@@ -279,23 +277,25 @@ function DismissDialog({ findings, onClose }: { findings: Finding[] | undefined;
   const svc = useServices();
   const queryClient = useQueryClient();
   const [reason, setReason] = useState("");
+  const refresh = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["security"] });
+    svc.invalidate(["home"]);
+  };
   const dismiss = useMutation({
-    mutationFn: async (items: Finding[]) => {
-      await Promise.all(
-        [...new Set(items.map((f) => f.id))].map((id) => {
-          const stamp = { hlc: svc.clock.tick(), deviceId: svc.clock.deviceId };
-          return svc.store.db
-            .insert(dismissals)
-            .values({ id, target: id, reason, ...stamp })
-            .onConflictDoUpdate({ target: dismissals.id, set: { deleted: false, reason, ...stamp } });
-        }),
-      );
-    },
-    onSuccess: async () => {
+    mutationFn: (items: Finding[]) =>
+      dismissAdvisories(
+        svc,
+        items.map((f) => f.id),
+        reason,
+      ),
+    onSuccess: async (_, items) => {
       setReason("");
       onClose();
-      await queryClient.invalidateQueries({ queryKey: ["security"] });
-      svc.invalidate(["home"]);
+      const ids = [...new Set(items.map((f) => f.id))];
+      toastUndo(ids.length === 1 ? "Advisory dismissed" : `${ids.length} advisories dismissed`, () =>
+        restoreAdvisories(svc, ids).then(refresh, toastError),
+      );
+      await refresh();
     },
     onError: toastError,
   });

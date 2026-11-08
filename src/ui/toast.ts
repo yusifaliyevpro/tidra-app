@@ -1,7 +1,13 @@
+interface ToastAction {
+  label: string;
+  run: () => void | Promise<void>;
+}
+
 interface Toast {
   id: number;
   message: string;
   tone: "info" | "error";
+  action?: ToastAction;
 }
 
 let toasts: Toast[] = [];
@@ -14,12 +20,16 @@ export function dismiss(id: number) {
   emit();
 }
 
-export function toast(message: string, tone: Toast["tone"] = "info") {
+export function toast(message: string, tone: Toast["tone"] = "info", action?: ToastAction) {
   const id = nextId++;
-  toasts = [...toasts.slice(-3), { id, message, tone }];
+  toasts = [...toasts.slice(-3), { id, message, tone, action }];
   emit();
-  setTimeout(() => dismiss(id), tone === "error" ? 8000 : 4000);
+  setTimeout(() => dismiss(id), tone === "error" ? 8000 : action ? 6000 : 4000);
 }
+
+/** For reversible actions: done at once, with a few seconds to take it back. */
+export const toastUndo = (message: string, undo: () => void | Promise<void>) =>
+  toast(message, "info", { label: "Undo", run: undo });
 
 export const toastError = (error: unknown) => toast(error instanceof Error ? error.message : String(error), "error");
 

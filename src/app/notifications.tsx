@@ -43,13 +43,13 @@ export function NotificationBell() {
         title="Notifications"
         onClick={() => setOpen(!open)}
         className={cn(
-          "relative flex h-8 w-8 items-center justify-center rounded-md text-muted transition-colors hover:bg-hover hover:text-fg",
+          "relative flex size-7 items-center justify-center rounded-md text-faint transition-colors hover:bg-hover hover:text-fg",
           open && "bg-hover text-fg",
         )}
       >
         <Bell className="size-4" />
         {unread > 0 ? (
-          <span className="absolute top-[7px] right-[7px] size-1.5 rounded-full bg-accent ring-2 ring-bg" />
+          <span className="absolute top-[5px] right-[5px] size-1.5 rounded-full bg-accent ring-2 ring-canvas" />
         ) : null}
       </button>
       {open ? <NotificationPanel items={items} unread={unread} onClose={() => setOpen(false)} /> : null}
@@ -70,7 +70,7 @@ function NotificationPanel({ items, unread, onClose }: { items: Notification[]; 
   return (
     <section
       aria-label="Notifications"
-      className="absolute top-full right-0 z-50 mt-1 flex max-h-[480px] w-96 flex-col overflow-hidden rounded-lg border border-line-strong bg-raised shadow-lg"
+      className="absolute top-full left-0 z-50 mt-1 flex max-h-[480px] w-96 origin-top-right animate-pop-in flex-col overflow-hidden rounded-lg border border-line-strong bg-raised shadow-pop"
     >
       <header className="flex h-10 shrink-0 items-center border-b border-line px-3">
         <span className="font-medium">Notifications</span>

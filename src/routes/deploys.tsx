@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ExternalLink as ExternalLinkIcon, Rocket } from "lucide-react";
+import { ExternalLink as ExternalLinkIcon } from "lucide-react";
 import { useDeploys, useReports } from "@/app/queries";
 import type { DeployState } from "@/integrations/deploy";
 import { JobRefresh } from "@/modules/common";
@@ -31,10 +31,9 @@ function Deploys() {
     return (
       <Page title="Deploys">
         <Empty
-          icon={<Rocket />}
           title="No deploy providers connected"
           action={
-            <Link to="/settings" search={{ section: "deploys" }} className="text-accent hover:underline">
+            <Link to="/settings" search={{ section: "deploys" }} className="text-accent-text hover:underline">
               Connect Vercel, Netlify or Cloudflare
             </Link>
           }
@@ -47,7 +46,7 @@ function Deploys() {
   }
 
   return (
-    <Page title="Deploys" subtitle="Latest per site" actions={<JobRefresh jobId="deploys" />}>
+    <Page title="Deploys" actions={<JobRefresh jobId="deploys" />}>
       <div className="mx-auto flex max-w-5xl flex-col gap-3 p-5">
         {data?.errors.map((e) => (
           <ErrorNote key={e.provider}>

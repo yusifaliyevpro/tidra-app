@@ -10,15 +10,13 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ActionsRouteImport } from './routes/actions'
-import { Route as BotsRouteImport } from './routes/bots'
 import { Route as ChangelogsRouteImport } from './routes/changelogs'
 import { Route as CiRouteImport } from './routes/ci'
 import { Route as DeploysRouteImport } from './routes/deploys'
-import { Route as GitRouteImport } from './routes/git'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as PackagesRouteImport } from './routes/packages'
+import { Route as ReposRouteImport } from './routes/repos'
 import { Route as ScriptsRouteImport } from './routes/scripts'
 import { Route as SecurityRouteImport } from './routes/security'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -29,16 +27,6 @@ import { Route as ProjectsProjectIdRouteImport } from './routes/projects/$projec
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ActionsRoute = ActionsRouteImport.update({
-  id: '/actions',
-  path: '/actions',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const BotsRoute = BotsRouteImport.update({
-  id: '/bots',
-  path: '/bots',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChangelogsRoute = ChangelogsRouteImport.update({
@@ -56,11 +44,6 @@ const DeploysRoute = DeploysRouteImport.update({
   path: '/deploys',
   getParentRoute: () => rootRouteImport,
 } as any)
-const GitRoute = GitRouteImport.update({
-  id: '/git',
-  path: '/git',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const InboxRoute = InboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
@@ -74,6 +57,11 @@ const OnboardingRoute = OnboardingRouteImport.update({
 const PackagesRoute = PackagesRouteImport.update({
   id: '/packages',
   path: '/packages',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReposRoute = ReposRouteImport.update({
+  id: '/repos',
+  path: '/repos',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ScriptsRoute = ScriptsRouteImport.update({
@@ -109,15 +97,13 @@ const ProjectsProjectIdRoute = ProjectsProjectIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/actions': typeof ActionsRoute
-  '/bots': typeof BotsRoute
   '/changelogs': typeof ChangelogsRoute
   '/ci': typeof CiRoute
   '/deploys': typeof DeploysRoute
-  '/git': typeof GitRoute
   '/inbox': typeof InboxRoute
   '/onboarding': typeof OnboardingRoute
   '/packages': typeof PackagesRoute
+  '/repos': typeof ReposRoute
   '/scripts': typeof ScriptsRoute
   '/security': typeof SecurityRoute
   '/settings': typeof SettingsRoute
@@ -127,15 +113,13 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/actions': typeof ActionsRoute
-  '/bots': typeof BotsRoute
   '/changelogs': typeof ChangelogsRoute
   '/ci': typeof CiRoute
   '/deploys': typeof DeploysRoute
-  '/git': typeof GitRoute
   '/inbox': typeof InboxRoute
   '/onboarding': typeof OnboardingRoute
   '/packages': typeof PackagesRoute
+  '/repos': typeof ReposRoute
   '/scripts': typeof ScriptsRoute
   '/security': typeof SecurityRoute
   '/settings': typeof SettingsRoute
@@ -146,15 +130,13 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/actions': typeof ActionsRoute
-  '/bots': typeof BotsRoute
   '/changelogs': typeof ChangelogsRoute
   '/ci': typeof CiRoute
   '/deploys': typeof DeploysRoute
-  '/git': typeof GitRoute
   '/inbox': typeof InboxRoute
   '/onboarding': typeof OnboardingRoute
   '/packages': typeof PackagesRoute
+  '/repos': typeof ReposRoute
   '/scripts': typeof ScriptsRoute
   '/security': typeof SecurityRoute
   '/settings': typeof SettingsRoute
@@ -166,15 +148,13 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/actions'
-    | '/bots'
     | '/changelogs'
     | '/ci'
     | '/deploys'
-    | '/git'
     | '/inbox'
     | '/onboarding'
     | '/packages'
+    | '/repos'
     | '/scripts'
     | '/security'
     | '/settings'
@@ -184,15 +164,13 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/actions'
-    | '/bots'
     | '/changelogs'
     | '/ci'
     | '/deploys'
-    | '/git'
     | '/inbox'
     | '/onboarding'
     | '/packages'
+    | '/repos'
     | '/scripts'
     | '/security'
     | '/settings'
@@ -202,15 +180,13 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
-    | '/actions'
-    | '/bots'
     | '/changelogs'
     | '/ci'
     | '/deploys'
-    | '/git'
     | '/inbox'
     | '/onboarding'
     | '/packages'
+    | '/repos'
     | '/scripts'
     | '/security'
     | '/settings'
@@ -221,15 +197,13 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ActionsRoute: typeof ActionsRoute
-  BotsRoute: typeof BotsRoute
   ChangelogsRoute: typeof ChangelogsRoute
   CiRoute: typeof CiRoute
   DeploysRoute: typeof DeploysRoute
-  GitRoute: typeof GitRoute
   InboxRoute: typeof InboxRoute
   OnboardingRoute: typeof OnboardingRoute
   PackagesRoute: typeof PackagesRoute
+  ReposRoute: typeof ReposRoute
   ScriptsRoute: typeof ScriptsRoute
   SecurityRoute: typeof SecurityRoute
   SettingsRoute: typeof SettingsRoute
@@ -245,20 +219,6 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/actions': {
-      id: '/actions'
-      path: '/actions'
-      fullPath: '/actions'
-      preLoaderRoute: typeof ActionsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/bots': {
-      id: '/bots'
-      path: '/bots'
-      fullPath: '/bots'
-      preLoaderRoute: typeof BotsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/changelogs': {
@@ -282,13 +242,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DeploysRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/git': {
-      id: '/git'
-      path: '/git'
-      fullPath: '/git'
-      preLoaderRoute: typeof GitRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/inbox': {
       id: '/inbox'
       path: '/inbox'
@@ -308,6 +261,13 @@ declare module '@tanstack/react-router' {
       path: '/packages'
       fullPath: '/packages'
       preLoaderRoute: typeof PackagesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/repos': {
+      id: '/repos'
+      path: '/repos'
+      fullPath: '/repos'
+      preLoaderRoute: typeof ReposRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/scripts': {
@@ -357,15 +317,13 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ActionsRoute: ActionsRoute,
-  BotsRoute: BotsRoute,
   ChangelogsRoute: ChangelogsRoute,
   CiRoute: CiRoute,
   DeploysRoute: DeploysRoute,
-  GitRoute: GitRoute,
   InboxRoute: InboxRoute,
   OnboardingRoute: OnboardingRoute,
   PackagesRoute: PackagesRoute,
+  ReposRoute: ReposRoute,
   ScriptsRoute: ScriptsRoute,
   SecurityRoute: SecurityRoute,
   SettingsRoute: SettingsRoute,

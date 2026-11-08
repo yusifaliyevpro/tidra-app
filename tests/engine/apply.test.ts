@@ -170,7 +170,7 @@ describe("commitMessage", () => {
 });
 
 describe("runUpdate", () => {
-  it("branches, adds through the package manager and checks, leaving the commit to the user", async () => {
+  it("adds through the package manager and checks on the current branch, leaving the commit to the user", async () => {
     const io = memoryIo(
       { "/r/package.json": ROOT_PKG, "/r/pnpm-lock.yaml": "lockfileVersion: '9.0'\n" },
       { run: gitRunner() },
@@ -178,24 +178,20 @@ describe("runUpdate", () => {
     const ws = await loadWorkspace(io, "/r");
     const steps: string[] = [];
     const result = await runUpdate(io, ws, [react], {
-      branch: "tidra/deps-2026-10-31",
       checks: [{ label: "check", command: scriptCommand(ws.pm, "check") }],
       onStep: (step, state) => steps.push(`${step}:${state}`),
     });
 
-    expect(result).toMatchObject({
-      ok: true,
-      createdBranch: "tidra/deps-2026-10-31",
-      previousBranch: "main",
-    });
+    expect(result).toMatchObject({ ok: true, previousBranch: "main" });
+    expect(result.createdBranch).toBeUndefined();
     expect(result.touched).toEqual(["package.json", "pnpm-lock.yaml"]);
     expect(io.runs.map((r) => [r.program, ...r.args].join(" "))).toEqual([
       "git status --porcelain=v2 --branch",
-      "git switch -c tidra/deps-2026-10-31",
       "pnpm add react@^19.3.1",
+      "git diff --name-only --relative HEAD",
       "pnpm run check",
     ]);
-    expect(steps.filter((s) => s.endsWith(":done"))).toHaveLength(4);
+    expect(steps.filter((s) => s.endsWith(":done"))).toHaveLength(3);
     expect(steps).toContain("write:skipped");
   });
 
@@ -258,17 +254,6 @@ describe("runUpdate edge cases", () => {
     expect(result).toMatchObject({ ok: false, failedStep: "install" });
     expect(result.error).toBe("npm install react@^19.3.1 --save exited with 1");
     expect(io.runs.some((r) => r.args.includes("check"))).toBe(false);
-  });
-
-  it("stays on the current branch when no branch is asked for", async () => {
-    const io = memoryIo({ "/r/package.json": ROOT_PKG }, { run: gitRunner() });
-    const ws = await loadWorkspace(io, "/r");
-    const steps: string[] = [];
-    const result = await runUpdate(io, ws, [react], { checks: [], onStep: (s, state) => steps.push(`${s}:${state}`) });
-    expect(result).toMatchObject({ ok: true, previousBranch: "main" });
-    expect(result.createdBranch).toBeUndefined();
-    expect(steps).toEqual(expect.arrayContaining(["branch:skipped", "checks:skipped"]));
-    expect(io.runs.some((r) => r.args[0] === "switch")).toBe(false);
   });
 
   it("writes catalog changes itself, then installs once", async () => {
@@ -382,5 +367,33 @@ describe("planAddCommands in a workspace root", () => {
     });
     const ws = await loadWorkspace(io, "/r");
     expect(planAddCommands(ws, [react])[0]?.command.args).not.toContain("-W");
+  });
+});
+
+describe("what revert restores", () => {
+  it("restores pnpm-workspace.yaml when pnpm add rewrote it without a catalog change", async () => {
+    // pnpm prunes minimumReleaseAgeExclude in pnpm-workspace.yaml during `add`; Tidra never planned that write.
+    const io = memoryIo(
+      {
+        "/r/package.json": ROOT_PKG,
+        "/r/pnpm-workspace.yaml": "minimumReleaseAgeExclude:\n  - react\n",
+        "/r/pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+      },
+      {
+        run: (program, args) => {
+          if (program === "git" && args[0] === "diff") return ok("package.json\npnpm-lock.yaml\npnpm-workspace.yaml\n");
+          return gitRunner()(program, args);
+        },
+      },
+    );
+    const ws = await loadWorkspace(io, "/r");
+    const result = await runUpdate(io, ws, [react], { checks: [] });
+    expect(result.ok).toBe(true);
+    expect(result.touched).toContain("pnpm-workspace.yaml");
+
+    io.runs.length = 0;
+    await revertUpdate(io, ws, result);
+    const restored = io.runs.filter((r) => r.program === "git" && r.args[0] === "checkout").map((r) => r.args.at(-1));
+    expect(restored).toContain("pnpm-workspace.yaml");
   });
 });

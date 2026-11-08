@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Plus, ScrollText, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { useState } from "react";
 import { useReports, useTimeline } from "@/app/queries";
 import { useServices } from "@/app/services";
@@ -17,7 +17,7 @@ import { Empty, ErrorNote, Page, Split } from "@/ui/layout";
 import { ExternalLink, Markdown } from "@/ui/markdown";
 import { Spinner } from "@/ui/spinner";
 import { TimeAgo } from "@/ui/time";
-import { toast, toastError } from "@/ui/toast";
+import { toastError } from "@/ui/toast";
 
 export const Route = createFileRoute("/changelogs")({ component: Changelogs });
 
@@ -40,7 +40,7 @@ function Changelogs() {
   return (
     <Page
       title="Changelogs"
-      subtitle="Watched, last 45 days"
+
       className="overflow-hidden"
       actions={
         <>
@@ -57,11 +57,10 @@ function Changelogs() {
         </div>
       ) : !timeline?.items.length ? (
         <Empty
-          icon={<ScrollText />}
           title={watchCount > 0 ? "No releases in the last 45 days" : "Nothing watched"}
           action={
             <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setWatching(true)}>
-              Watch a package or repo
+              Watch packages
             </Button>
           }
         />
@@ -133,7 +132,7 @@ function FeedRow({ feed, selected, onSelect }: { feed: Feed; selected: boolean; 
       onClick={onSelect}
       className={cn(
         "flex w-full flex-col gap-0.5 border-b border-line px-4 py-2.5 text-left hover:bg-hover",
-        selected && "bg-raised",
+        selected && "bg-selected",
       )}
     >
       <span className="flex items-center gap-2">
@@ -215,9 +214,8 @@ function WatchDialog({ open, onClose }: { open: boolean; onClose: () => void }) 
       if ("package" in target) await setPackageWatched(svc, target.package, true);
       else await svc.store.watchRepo(target.owner, target.repo);
     },
-    onSuccess: async (_, target) => {
+    onSuccess: async () => {
       setValue("");
-      toast(`Watching ${"package" in target ? target.package : `${target.owner}/${target.repo}`}.`);
       await changed();
     },
     onError: toastError,

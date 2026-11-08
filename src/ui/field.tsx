@@ -9,7 +9,7 @@ import {
 } from "react";
 
 const CONTROL =
-  "w-full rounded-md border border-line-strong bg-surface px-2.5 text-base text-fg placeholder:text-faint transition-colors focus:border-accent/60 focus:outline-none disabled:opacity-50";
+  "w-full rounded-md border border-line-strong bg-surface px-2.5 text-base text-fg placeholder:text-faint transition-colors duration-[80ms] focus:border-focus focus:outline-none disabled:opacity-45 aria-invalid:border-bad";
 
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return <input className={cn(CONTROL, "h-7", className)} spellCheck={false} {...props} />;
@@ -54,7 +54,7 @@ export function Field({
         {label}
       </label>
       {children(id)}
-      {error ? <p className="text-sm text-bad">{error}</p> : hint ? <p className="text-sm text-muted">{hint}</p> : null}
+      {error ? <p className="text-sm text-bad">{error}</p> : hint ? <p className="text-sm text-faint">{hint}</p> : null}
     </div>
   );
 }
@@ -106,14 +106,14 @@ export function Switch({
       aria-label={label}
       onClick={() => onChange(!checked)}
       className={cn(
-        "relative h-4 w-7 shrink-0 rounded-full border border-line-strong transition-colors duration-150",
-        checked ? "bg-accent" : "bg-raised",
+        "relative h-[18px] w-[30px] shrink-0 rounded-full transition-colors duration-150",
+        checked ? "bg-accent" : "bg-selected",
       )}
     >
       <span
         className={cn(
-          "absolute top-1/2 left-0.5 size-2.5 -translate-y-1/2 rounded-full transition-transform duration-150 ease-out",
-          checked ? "translate-x-3 bg-accent-fg" : "bg-muted",
+          "absolute top-1/2 left-[2px] size-3.5 -translate-y-1/2 rounded-full transition-transform duration-150 ease-spring",
+          checked ? "translate-x-3 bg-accent-fg" : "bg-fg",
         )}
       />
     </button>

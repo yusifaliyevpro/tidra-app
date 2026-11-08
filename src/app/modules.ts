@@ -1,11 +1,8 @@
 import {
-  Activity,
-  Bot,
   Boxes,
   FolderGit2,
-  GitBranch,
   GitPullRequest,
-  LayoutDashboard,
+  House,
   Package,
   Rocket,
   ScrollText,
@@ -13,7 +10,7 @@ import {
   ShieldAlert,
   SquareTerminal,
   Wrench,
-  Workflow,
+  GitBranch,
   type LucideIcon,
 } from "lucide-react";
 
@@ -24,25 +21,22 @@ export interface ModuleDef {
   icon: LucideIcon;
   /** `g` then this key jumps to the module. */
   key: string;
-  group: "main" | "github" | "more";
+  group: "main" | "tools" | "settings";
 }
 
 /** Sidebar order and keyboard shortcuts; routes live in `src/routes`. */
 export const MODULES: ModuleDef[] = [
-  { id: "home", title: "Overview", path: "/", icon: LayoutDashboard, key: "h", group: "main" },
+  { id: "home", title: "Home", path: "/", icon: House, key: "h", group: "main" },
   { id: "projects", title: "Projects", path: "/projects", icon: FolderGit2, key: "p", group: "main" },
+  { id: "repos", title: "Repos", path: "/repos", icon: GitBranch, key: "r", group: "main" },
   { id: "security", title: "Security", path: "/security", icon: ShieldAlert, key: "s", group: "main" },
   { id: "changelogs", title: "Changelogs", path: "/changelogs", icon: ScrollText, key: "l", group: "main" },
-  { id: "actions", title: "Actions", path: "/actions", icon: Workflow, key: "a", group: "main" },
-  { id: "git", title: "Git", path: "/git", icon: GitBranch, key: "g", group: "main" },
-  { id: "inbox", title: "Pull requests", path: "/inbox", icon: GitPullRequest, key: "i", group: "github" },
-  { id: "ci", title: "CI", path: "/ci", icon: Activity, key: "c", group: "github" },
-  { id: "bots", title: "Bot PRs", path: "/bots", icon: Bot, key: "b", group: "github" },
-  { id: "deploys", title: "Deploys", path: "/deploys", icon: Rocket, key: "r", group: "more" },
-  { id: "packages", title: "My packages", path: "/packages", icon: Package, key: "k", group: "more" },
-  { id: "toolchain", title: "Toolchain", path: "/toolchain", icon: Wrench, key: "t", group: "more" },
-  { id: "scripts", title: "Scripts", path: "/scripts", icon: SquareTerminal, key: "x", group: "more" },
-  { id: "settings", title: "Settings", path: "/settings", icon: Settings, key: ",", group: "more" },
+  { id: "inbox", title: "Pull requests", path: "/inbox", icon: GitPullRequest, key: "i", group: "main" },
+  { id: "deploys", title: "Deploys", path: "/deploys", icon: Rocket, key: "d", group: "tools" },
+  { id: "packages", title: "Packages", path: "/packages", icon: Package, key: "k", group: "tools" },
+  { id: "toolchain", title: "Toolchain", path: "/toolchain", icon: Wrench, key: "t", group: "tools" },
+  { id: "scripts", title: "Scripts", path: "/scripts", icon: SquareTerminal, key: "x", group: "tools" },
+  { id: "settings", title: "Settings", path: "/settings", icon: Settings, key: ",", group: "settings" },
 ];
 
 export const MODULE_ICON_FALLBACK = Boxes;

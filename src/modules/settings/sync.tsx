@@ -85,7 +85,7 @@ function RecoveryKit({ kit, onClose }: { kit: Kit; onClose: () => void }) {
         {kit.recoveryKey ? (
           <Field label="Recovery key">
             {() => (
-              <Mono className="rounded-md border border-line bg-raised p-2.5 text-base break-all select-text">
+              <Mono className="rounded-md border border-line bg-selected p-2.5 text-base break-all select-text">
                 {kit.recoveryKey}
               </Mono>
             )}

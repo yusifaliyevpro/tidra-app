@@ -187,7 +187,7 @@ function GroupHeader({
   onToggle: () => void;
 }) {
   return (
-    <label className="sticky top-0 z-10 flex h-9 items-center gap-2.5 border-b border-line bg-surface px-4 text-xs">
+    <label className="sticky top-0 z-10 flex h-8 items-center gap-2.5 border-b border-line bg-canvas px-4 text-sm">
       <Checkbox label={`Select all ${bump} updates`} checked={checkState(count, total)} onChange={onToggle} />
       <span className={`font-medium ${BUMP_COLOR[bump]}`}>{GROUP_LABEL[bump]}</span>
       <span className="ml-auto text-faint tabular">{count > 0 ? `${count} of ${total}` : total}</span>
@@ -217,7 +217,7 @@ function DependencyRow({
   return (
     <div
       data-row-id={rowKey}
-      className={`flex h-10 items-center border-b border-line hover:bg-hover ${current ? "bg-raised" : ""}`}
+      className={`flex h-9 items-center border-b border-line hover:bg-hover ${current ? "bg-selected" : ""}`}
     >
       <label htmlFor={id} className="flex h-full shrink-0 items-center pr-2.5 pl-4">
         <Checkbox id={id} label={`Select ${entry.name}`} checked={picked} onChange={() => onToggle([rowKey])} />

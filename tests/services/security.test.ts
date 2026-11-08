@@ -3,7 +3,8 @@ import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { projectPaths } from "@/core/db/schema";
 import { OSV_BATCH_URL } from "@/engine/advisories";
-import { readSecurity, scanAllProjects, scanProject } from "@/services/security";
+import { dismissedAdvisories } from "@/services/home";
+import { dismissAdvisories, readSecurity, restoreAdvisories, scanAllProjects, scanProject } from "@/services/security";
 import { jsonResponse, memoryIo } from "../support/memory-io";
 import { testServices } from "../support/services";
 
@@ -190,5 +191,20 @@ describe("incomplete scans", () => {
     close();
     expect(report.error).toBe("OSV returned 400");
     expect(report.findings).toHaveLength(1);
+  });
+});
+
+describe("dismissing advisories", () => {
+  it("hides advisories and brings them back on undo", async () => {
+    const { svc, close } = await testServices();
+    await dismissAdvisories(svc, ["GHSA-1", "GHSA-2", "GHSA-1"], "not reachable");
+    expect([...(await dismissedAdvisories(svc))].toSorted()).toEqual(["GHSA-1", "GHSA-2"]);
+
+    await restoreAdvisories(svc, ["GHSA-1"]);
+    expect([...(await dismissedAdvisories(svc))]).toEqual(["GHSA-2"]);
+
+    await dismissAdvisories(svc, ["GHSA-1"], "again");
+    expect([...(await dismissedAdvisories(svc))].toSorted()).toEqual(["GHSA-1", "GHSA-2"]);
+    close();
   });
 });
