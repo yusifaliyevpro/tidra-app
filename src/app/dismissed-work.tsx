@@ -1,5 +1,6 @@
 import { CircleCheck, CircleX, X } from "lucide-react";
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { ProcessDialog, useProcessList } from "@/modules/process-dialog";
 import { UpdateRunDialog } from "@/modules/projects/update-run";
 import { dismissedWork, type DismissedWork } from "@/services/dismissed";
@@ -62,6 +63,21 @@ export function DismissedWorkChips() {
       {items.map((work) => (
         <WorkChip key={work.id} work={work} onOpen={() => setOpen(work)} />
       ))}
+      {createPortal(<ReopenedDialog open={open} setOpen={setOpen} />, document.body)}
+    </>
+  );
+}
+
+/** Portaled out of the header, whose pointer-events: none would otherwise let every click in the dialog through. */
+function ReopenedDialog({
+  open,
+  setOpen,
+}: {
+  open: DismissedWork | undefined;
+  setOpen: (work?: DismissedWork) => void;
+}) {
+  return (
+    <>
       {open?.kind === "run" ? (
         <UpdateRunDialog
           runId={open.id}
