@@ -2,6 +2,7 @@ import { isPermissionGranted, requestPermission, sendNotification } from "@tauri
 import * as z from "@zod/mini";
 import { desc, eq } from "drizzle-orm";
 import { notifications } from "@/core/db/schema";
+import { setTrayAttention } from "@/core/native";
 import type { Services } from "./context";
 
 export const NOTIFICATION_KINDS = {
@@ -72,6 +73,7 @@ export async function notify(
     .returning({ key: notifications.key });
   if (inserted.length === 0) return;
   await svc.queryClient.invalidateQueries({ queryKey: ["notifications"] });
+  await updateTray(svc);
   queue(svc, input.delivery ?? "summary");
 }
 
@@ -81,9 +83,26 @@ export const listNotifications = (svc: Services) =>
 export async function markNotificationRead(svc: Services, key: string) {
   await svc.store.db.update(notifications).set({ read: true }).where(eq(notifications.key, key));
   await svc.queryClient.invalidateQueries({ queryKey: ["notifications"] });
+  await updateTray(svc);
 }
 
 export async function markAllNotificationsRead(svc: Services) {
   await svc.store.db.update(notifications).set({ read: true }).where(eq(notifications.read, false));
   await svc.queryClient.invalidateQueries({ queryKey: ["notifications"] });
+  await updateTray(svc);
+}
+
+export async function hasUnreadNotifications(svc: Services) {
+  const rows = await svc.store.db
+    .select({ key: notifications.key })
+    .from(notifications)
+    .where(eq(notifications.read, false))
+    .limit(1);
+  return rows.length > 0;
+}
+
+/** The tray dot means unread notifications: what the user has already seen never keeps it on. */
+export async function updateTray(svc: Services) {
+  if (svc.preview) return;
+  await setTrayAttention(await hasUnreadNotifications(svc), svc.scheduler.isPaused()).catch(() => undefined);
 }

@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { setTrayAttention } from "@/core/native";
 import type { Finding } from "@/engine/advisories";
 import { notifySecurity } from "@/services/jobs";
 import {
@@ -7,11 +8,16 @@ import {
   markNotificationRead,
   notify,
   NOTIFY_SETTING,
+  updateTray,
 } from "@/services/notify";
 import { securityKey } from "@/services/security";
 import { writeSnapshot } from "@/services/snapshot";
 import { memoryIo } from "../support/memory-io";
 import { testServices } from "../support/services";
+
+vi.mock("@/core/native", () => ({ setTrayAttention: vi.fn<() => Promise<void>>(async () => undefined) }));
+
+const trayDot = () => vi.mocked(setTrayAttention).mock.lastCall?.[0];
 
 const finding = (id: string, severity: Finding["severity"], name = "undici"): Finding => ({
   id,
@@ -91,6 +97,25 @@ describe("notify", () => {
     expect((await listNotifications(svc)).filter((n) => n.read).map((n) => n.key)).toEqual(["ci:a"]);
     await markAllNotificationsRead(svc);
     expect((await listNotifications(svc)).every((n) => n.read)).toBe(true);
+    close();
+  });
+});
+
+describe("updateTray", () => {
+  it("shows the dot only while a notification is unread, whatever the advisories", async () => {
+    const { svc: preview, close, scan } = await setup();
+    const svc = { ...preview, preview: false };
+    vi.mocked(setTrayAttention).mockClear();
+    await scan([finding("A", "critical")]);
+    await updateTray(svc);
+    expect(trayDot()).toBe(false);
+    await notify(svc, "advisory", { key: "a", title: "t", body: "b", delivery: "in-app" });
+    expect(trayDot()).toBe(true);
+    await notify(svc, "ci", { key: "b", title: "t", body: "b", delivery: "in-app" });
+    await markNotificationRead(svc, "advisory:a");
+    expect(trayDot()).toBe(true);
+    await markAllNotificationsRead(svc);
+    expect(trayDot()).toBe(false);
     close();
   });
 });

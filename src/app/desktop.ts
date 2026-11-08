@@ -2,8 +2,9 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { register, unregisterAll } from "@tauri-apps/plugin-global-shortcut";
 import * as z from "@zod/mini";
-import { inTauri, setTrayAttention } from "@/core/native";
+import { inTauri } from "@/core/native";
 import type { Services } from "@/services/context";
+import { updateTray } from "@/services/notify";
 import { applyTheme, THEME_SETTING, THEMES } from "./theme";
 
 export const HOTKEY_SETTING = "hotkey";
@@ -50,7 +51,7 @@ export async function startDesktopIntegration(svc: Services) {
     if (event.payload === "refresh") await svc.scheduler.runAll();
     if (event.payload === "pause") {
       svc.scheduler.setPaused(!svc.scheduler.isPaused());
-      await setTrayAttention(false, svc.scheduler.isPaused());
+      await updateTray(svc);
       await svc.queryClient.invalidateQueries({ queryKey: ["jobs"] });
     }
   });

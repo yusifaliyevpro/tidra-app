@@ -54,7 +54,7 @@ pub fn tray_set_attention(app: AppHandle, attention: bool, paused: bool) -> Resu
     let tray = app.tray_by_id(TRAY_ID).ok_or("tray is not ready")?;
     let bytes = if attention { ICON_ATTENTION } else { ICON };
     tray.set_icon(Some(Image::from_bytes(bytes).map_err(|err| err.to_string())?)).map_err(|err| err.to_string())?;
-    let tooltip = if attention { "Tidra: needs attention" } else { "Tidra" };
+    let tooltip = if attention { "Tidra: unread notifications" } else { "Tidra" };
     tray.set_tooltip(Some(tooltip)).map_err(|err| err.to_string())?;
     let label = if paused { "Resume background checks" } else { "Pause background checks" };
     app.state::<TrayState>().pause.set_text(label).map_err(|err| err.to_string())
