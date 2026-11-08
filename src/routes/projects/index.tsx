@@ -31,6 +31,7 @@ import { Chip, Empty, Page } from "@/ui/layout";
 import { Mono } from "@/ui/misc";
 import { ContextMenu, MenuItem, MenuSeparator } from "@/ui/popover";
 import { StatusGlyph } from "@/ui/status-glyph";
+import { tableColumns } from "@/ui/table-columns";
 import { toast, toastError } from "@/ui/toast";
 
 const FILTERS = ["all", "updates", "advisories", "changes", "unpushed"] as const;
@@ -315,7 +316,8 @@ function ProjectsBody({
   );
 }
 
-const COLS = "grid grid-cols-[20px_16px_minmax(0,1fr)_220px_36px_36px_36px_80px_160px] items-center gap-x-3";
+const COLS = "grid items-center gap-x-3";
+const COLUMNS = tableColumns(["20px", "16px", "1fr", "220px", "36px", "36px", "36px", "80px", "160px"], 160);
 
 function ProjectList({
   groups,
@@ -340,7 +342,10 @@ function ProjectList({
   const checking = jobs.some((j) => j.id === "projects" && j.running);
   return (
     <div className="min-h-0 flex-1 overflow-y-auto pb-16">
-      <div className={cn(COLS, "sticky top-0 z-10 h-[30px] border-b border-line bg-canvas px-5 text-sm text-muted")}>
+      <div
+        className={cn(COLS, "sticky top-0 z-10 h-[30px] border-b border-line bg-canvas px-5 text-sm text-muted")}
+        style={COLUMNS}
+      >
         <span />
         <span />
         <span>Project</span>
@@ -437,7 +442,7 @@ function GroupRow({
   onToggle: () => void;
 }) {
   return (
-    <div className={cn(COLS, "h-9 border-b border-line bg-hover px-5")}>
+    <div className={cn(COLS, "h-9 border-b border-line bg-hover px-5")} style={COLUMNS}>
       <button
         type="button"
         aria-expanded={open}
@@ -508,6 +513,7 @@ function ProjectRow({
         "group relative h-9 border-b border-line px-5 transition-colors duration-[80ms] [&_a]:pointer-events-auto [&_button]:pointer-events-auto [&_input]:pointer-events-auto [&>*]:pointer-events-none [&>*]:relative [&>*]:z-[1]",
         checked ? "bg-accent-bg" : selected ? "bg-selected" : "hover:bg-hover",
       )}
+      style={COLUMNS}
     >
       <button
         type="button"
