@@ -1,5 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { issueDraft } from "@/services/issue-draft";
 import { matchesAccelerator } from "./accelerator";
 import { MODULES } from "./modules";
 
@@ -7,7 +8,10 @@ const isTyping = (target: EventTarget | null) =>
   target instanceof HTMLElement &&
   (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
-/** The palette shortcut (Ctrl+K by default) opens the palette, Ctrl+B folds the sidebar; `g` then a module key navigates. */
+/**
+ * The palette shortcut (Ctrl+K by default) opens the palette, Ctrl+B folds the sidebar, Ctrl+Shift+B reports an issue;
+ * `g` then a module key navigates.
+ */
 export function useGlobalShortcuts(openPalette: () => void, paletteShortcut: string, toggleSidebar?: () => void) {
   const navigate = useNavigate();
   useEffect(() => {
@@ -16,6 +20,11 @@ export function useGlobalShortcuts(openPalette: () => void, paletteShortcut: str
       if (matchesAccelerator(event, paletteShortcut)) {
         event.preventDefault();
         openPalette();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        issueDraft.open();
         return;
       }
       if (toggleSidebar && (event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "b") {

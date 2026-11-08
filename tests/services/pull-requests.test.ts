@@ -38,7 +38,7 @@ describe("pullTarget", () => {
   });
 });
 
-async function stoppedUpdate(message: string) {
+async function stoppedUpdate(message: string, otherWork?: string[]) {
   const io = memoryIo(
     { "/r/package.json": JSON.stringify({ name: "r" }) },
     {
@@ -57,7 +57,7 @@ async function stoppedUpdate(message: string) {
     title: "Update react",
     startedAt: "2026-11-01T10:00:00.000Z",
     ok: false,
-    result: { ok: false, failedStep: "checks", message, changes: [], touched: [] },
+    result: { ok: false, failedStep: "checks", message, changes: [], touched: [], otherWork },
   });
   return { io, svc, close };
 }
@@ -71,6 +71,15 @@ describe("commitProject", () => {
     expect(subject).toBe("chore(deps): bump react 19.2.0 → 19.3.1");
     expect(git).toContain("add --all");
     expect(git).toContain("commit -m chore(deps): bump react 19.2.0 → 19.3.1");
+  });
+
+  it("leaves work that was uncommitted before the update out of its commit", async () => {
+    const { io, svc, close } = await stoppedUpdate("chore(deps): bump react 19.2.0 → 19.3.1", ["src/a.ts"]);
+    await commitProject(svc, "p1");
+    close();
+    const git = io.runs.map((r) => r.args.join(" "));
+    expect(git.indexOf("reset -q -- src/a.ts")).toBeGreaterThan(git.indexOf("add --all"));
+    expect(git.indexOf("reset -q -- src/a.ts")).toBeLessThan(git.findIndex((c) => c.startsWith("commit")));
   });
 
   it("uses an update's message only once", async () => {

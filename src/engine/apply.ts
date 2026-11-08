@@ -1,5 +1,5 @@
 import { bumpSubject } from "./bump-subject";
-import { createGit, GitError, isClean } from "./git";
+import { createGit, GitError } from "./git";
 import type { Io, OutputStream } from "./io";
 import { editCatalogs, editManifest, type CatalogEdit, type ManifestEdit } from "./manifest";
 import type { OutdatedEntry } from "./outdated";
@@ -141,7 +141,18 @@ export interface UpdateResult {
   changes: FileChange[];
   /** Files the update touched, relative to the project root, for revert. */
   touched: string[];
+  /** Touched files that already had uncommitted edits: revert writes these back instead of restoring HEAD. */
+  restore?: { path: string; text: string }[];
+  /** Tracked files with uncommitted edits before the update that it didn't touch: left out of its commit. */
+  otherWork?: string[];
 }
+
+/** Files an install may rewrite; their uncommitted edits are saved before the update so revert can keep them. */
+const PACKAGE_FILES = new Set(["package.json", "pnpm-workspace.yaml", ".npmrc", ".yarnrc.yml"]);
+const isPackageFile = (path: string) => {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  return PACKAGE_FILES.has(name) || LOCKFILE_NAMES.includes(name);
+};
 
 const LOCKFILE_NAMES = [
   "pnpm-lock.yaml",
@@ -191,7 +202,15 @@ export async function runUpdate(
     if (changes.length === 0) throw new Error("Nothing to update: the selected versions are already written.");
     const status = await git.status();
     result.previousBranch = status.branch;
-    if (!isClean(status)) throw new Error("The working tree has uncommitted changes. Commit or stash them first.");
+    // Other uncommitted work is fine; it stays out of what revert undoes.
+    const dirtyBefore = new Set(status.changed > 0 ? await git.changedPaths().catch((): string[] => []) : []);
+    for (const path of dirtyBefore) {
+      if (!isPackageFile(path)) continue;
+      const text = await io.readText(join(workspace.root, path));
+      if (text !== null) (result.restore ??= []).push({ path, text });
+    }
+    const other = [...dirtyBefore].filter((path) => !isPackageFile(path));
+    if (other.length > 0) result.otherWork = other;
     done();
 
     result.touched = changes.map((c) => relative(workspace.root, c.path));
@@ -215,10 +234,11 @@ export async function runUpdate(
         }
       }
       // The package manager may rewrite more than Tidra planned (pnpm prunes minimumReleaseAgeExclude in
-      // pnpm-workspace.yaml); the tree was clean before, so every tracked change belongs to this update.
+      // pnpm-workspace.yaml); a tracked change that wasn't there before belongs to this update.
       const known = new Set(result.touched);
+      const saved = new Set(result.restore?.map((r) => r.path));
       for (const path of await git.changedPaths().catch((): string[] => [])) {
-        if (known.has(path)) continue;
+        if (known.has(path) || (dirtyBefore.has(path) && !saved.has(path))) continue;
         known.add(path);
         result.touched.push(path);
       }
@@ -240,7 +260,7 @@ export async function runUpdate(
   return result;
 }
 
-/** Undoes an update that has not been committed: restores files, leaves the created branch, reinstalls. */
+/** Undoes an update that has not been committed: restores files as they were before it, leaves the created branch, reinstalls. */
 export async function revertUpdate(
   io: Io,
   workspace: Workspace,
@@ -248,7 +268,11 @@ export async function revertUpdate(
   onOutput?: UpdateOptions["onOutput"],
 ) {
   const git = createGit(io, workspace.root);
-  if (result.touched.length > 0) await git.restore(result.touched);
+  const saved = new Map(result.restore?.map((r) => [r.path, r.text]));
+  const fromHead = result.touched.filter((path) => !saved.has(path));
+  if (fromHead.length > 0) await git.restore(fromHead);
+  for (const [path, text] of saved)
+    if (result.touched.includes(path)) await io.writeText(join(workspace.root, path), text);
   if (result.createdBranch && result.previousBranch) {
     await git.switchTo(result.previousBranch);
     await git.deleteBranch(result.createdBranch);

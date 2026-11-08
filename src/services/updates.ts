@@ -58,6 +58,15 @@ export function branchName(now = new Date(), prefix = UPDATE_BRANCH_PREFIX): str
   return `${prefix}${stamp}`;
 }
 
+/** `branchName()`, with `-2`, `-3`… when a branch of that name already exists. */
+export function freshBranchName(existing: string[], now = new Date()): string {
+  const base = branchName(now);
+  const taken = new Set(existing);
+  let name = base;
+  for (let n = 2; taken.has(name); n++) name = `${base}-${n}`;
+  return name;
+}
+
 /** Records the run and returns its id together with a promise for the finished progress. */
 async function launchUpdate(svc: Services, projectId: string, picks: UpdatePick[]) {
   const project = await svc.store.getProject(projectId);

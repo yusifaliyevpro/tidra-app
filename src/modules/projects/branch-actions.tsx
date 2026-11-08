@@ -54,8 +54,8 @@ function branchState(git: GitStatus | undefined, allowCommit: boolean | undefine
     branch,
     updateBranch,
     featureBranch: Boolean(branch && !DEFAULT_BRANCHES.includes(branch)),
-    // A tracked branch is pushed by Sync; Push is only for publishing a branch the first time.
-    unpushed: hasUnpushed(git) && !git?.upstream,
+    // With commits coming in too, Sync pulls first and then pushes.
+    unpushed: hasUnpushed(git) && (git?.behind ?? 0) === 0,
     // An update stopped by its checks leaves its changes uncommitted; pushing alone would send nothing.
     canCommit: (git ? git.changed + git.untracked : 0) > 0 && (updateBranch || Boolean(allowCommit)),
   };
@@ -82,8 +82,8 @@ export function BranchActions({
     queryFn: () => (branch ? branchPull(svc, projectId, branch) : { state: "none" as const }),
   });
   const open = pull?.state === "open" ? pull : undefined;
-  // Open PR only off the default branch, once its pull request is known not to exist yet.
-  const canOpenPull = featureBranch && pull?.state === "none";
+  // Open PR only off the default branch, with commits to propose, once its pull request is known not to exist yet.
+  const canOpenPull = featureBranch && pull?.state === "none" && (pull.commits ?? 0) > 0;
   if (!canCommit && !unpushed && !open && !canOpenPull) return null;
   return (
     <span className="flex gap-1.5">
@@ -165,7 +165,7 @@ function CommitPushButton({ projectId, size }: { projectId: string; size: Size }
       </Button>
       <Popover
         align="end"
-        className="w-40 p-1"
+        className="w-56 p-1"
         renderTrigger={({ open, toggle }) => (
           <Button
             size={size}

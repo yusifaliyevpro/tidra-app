@@ -97,7 +97,7 @@ describe("SyncButton", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("counts commits to pull, to push and new on upstream", async () => {
+  it("counts commits coming in, and names the ones it pushes on the way", async () => {
     const { svc } = await setup("# branch.head main\n");
     render(
       wrap(
@@ -110,7 +110,13 @@ describe("SyncButton", () => {
       ),
     );
     const button = screen.getByRole("button", { name: "Sync, 5 to pull, 1 to push, 3 new on them/app" });
-    expect(button.textContent).toBe("6");
+    expect(button.textContent).toBe("5Sync");
+  });
+
+  it("leaves commits that only go out to Push", async () => {
+    const { svc } = await setup("# branch.head main\n");
+    const { container } = render(wrap(svc, <SyncButton projectId="p1" git={git({ ahead: 2 })} fork={undefined} />));
+    expect(container.innerHTML).toBe("");
   });
 
   it("doesn't count upstream's commits on a branch sync won't move", async () => {

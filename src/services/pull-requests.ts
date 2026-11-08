@@ -37,6 +37,9 @@ async function commitChanges(svc: Services, projectId: string): Promise<string> 
   const pending = await pendingRun(svc, projectId);
   const message = pending?.message ?? "chore(deps): update dependencies";
   await git.run(["add", "--all"]);
+  // Work that was already uncommitted before the update stays out of the update's commit.
+  const other = pending?.otherWork.map((path) => (project.subdir ? `${project.subdir}/${path}` : path)) ?? [];
+  if (other.length > 0) await git.run(["reset", "-q", "--", ...other]);
   await git.commit(message);
   if (pending) {
     const commitSha = await git.headSha();
@@ -67,8 +70,10 @@ async function pendingRun(svc: Services, projectId: string) {
   });
   const result = latest?.result;
   if (!latest || !result || typeof result !== "object") return undefined;
-  const { message, commitSha } = result as { message?: unknown; commitSha?: unknown };
-  return typeof message === "string" && commitSha === undefined ? { id: latest.id, message, result } : undefined;
+  const { message, commitSha, otherWork } = result as { message?: unknown; commitSha?: unknown; otherWork?: unknown };
+  if (typeof message !== "string" || commitSha !== undefined) return undefined;
+  const paths = Array.isArray(otherWork) ? otherWork.filter((p): p is string => typeof p === "string") : [];
+  return { id: latest.id, message, result, otherWork: paths };
 }
 
 /** Commit, then push, refreshing once at the end: in between, the screen would briefly offer a lone Push. */
@@ -154,12 +159,25 @@ export async function branchPull(
   svc: Services,
   projectId: string,
   branch: string,
-): Promise<{ state: PullState["state"]; url?: string; number?: number; title?: string }> {
+): Promise<{ state: PullState["state"]; url?: string; number?: number; title?: string; commits?: number }> {
   const project = await svc.store.getProject(projectId);
   if (!project?.path) return { state: "none" };
-  const pull = await pullFor(svc, await pullTarget(svc, project.path, project.remote), branch);
+  const target = await pullTarget(svc, project.path, project.remote);
+  const pull = await pullFor(svc, target, branch);
   if (pull.state === "open") return { state: "open", url: pull.url, number: pull.number, title: pull.title };
-  return pull.state === "none" ? pull : { state: pull.state, url: pull.url };
+  if (pull.state !== "none") return { state: pull.state, url: pull.url };
+  return { state: "none", commits: target ? await commitsAhead(createGit(svc.io, project.path), target) : 0 };
+}
+
+/** Commits on HEAD that the pull request's base branch doesn't have, as of the last fetch. */
+export async function commitsAhead(git: ReturnType<typeof createGit>, target: Pick<PullTarget, "remote">) {
+  const base =
+    target.remote === "upstream"
+      ? (await git.fork().catch(() => undefined))?.ref
+      : await git.defaultBranch().then((name) => (name ? `origin/${name}` : undefined));
+  if (!base) return 0;
+  const count = await git.raw(["rev-list", "--count", `${base}..HEAD`]);
+  return count.code === 0 ? Number(count.stdout.trim()) : 0;
 }
 
 /** Commit messages on HEAD that the target's default branch doesn't have, oldest first. */

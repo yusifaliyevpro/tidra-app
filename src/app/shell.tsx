@@ -1,11 +1,13 @@
 import { Outlet, useRouter } from "@tanstack/react-router";
 import * as z from "@zod/mini";
 import { useEffect, useState } from "react";
+import { ReportIssueDialog } from "@/modules/report-issue";
 import { ErrorBoundary } from "@/ui/error-boundary";
 import { handleMarkdownLinkClick } from "@/ui/external";
 import { Spinner } from "@/ui/spinner";
 import { Toaster } from "@/ui/toaster";
 import { DEFAULT_PALETTE_SHORTCUT, PALETTE_SHORTCUT_SETTING } from "./accelerator";
+import { DismissedWorkChips } from "./dismissed-work";
 import { Palette } from "./palette";
 import { useJobs, useSetting } from "./queries";
 import { useGlobalShortcuts } from "./shortcuts";
@@ -31,7 +33,7 @@ function ProgressLine() {
   );
 }
 
-/** What is being checked right now, centered in the header where the window title would be. */
+/** What is being checked right now, and dismissed output dialogs, centered where the window title would be. */
 function ActivityStatus() {
   const { data: jobs = [] } = useJobs();
   const running = jobs.filter((j) => j.running);
@@ -40,12 +42,13 @@ function ActivityStatus() {
     <div
       data-tauri-drag-region
       aria-live="polite"
-      className="pointer-events-none absolute top-0 left-1/2 z-20 hidden h-11 max-w-[36%] -translate-x-1/2 items-center lg:flex"
+      className="pointer-events-none absolute top-0 left-1/2 z-20 flex h-11 max-w-[44%] -translate-x-1/2 items-center gap-1.5"
     >
+      <DismissedWorkChips />
       {first ? (
         <span
           title={running.map((j) => j.title).join("\n")}
-          className="pointer-events-auto flex min-w-0 appear-late items-center gap-2 rounded-full bg-selected px-2.5 py-0.5 text-sm text-muted"
+          className="pointer-events-auto hidden min-w-0 appear-late items-center gap-2 rounded-full bg-selected px-2.5 py-0.5 text-sm text-muted lg:flex"
         >
           <Spinner className="size-3 shrink-0" />
           <span className="truncate">{first.title}</span>
@@ -114,6 +117,9 @@ export function Shell() {
       </main>
       <ErrorBoundary fallback={quiet}>
         <Palette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      </ErrorBoundary>
+      <ErrorBoundary fallback={quiet}>
+        <ReportIssueDialog />
       </ErrorBoundary>
       <Toaster />
     </div>

@@ -150,6 +150,10 @@ describe("computeOutdated", () => {
   });
 });
 
+const ageYaml = (exclude: string) => ({
+  "/r/pnpm-workspace.yaml": `minimumReleaseAge: 1440\nminimumReleaseAgeExclude:\n  - "${exclude}"\n`,
+});
+
 describe("pickLatest with minimumReleaseAge", () => {
   const doc = packument(
     "vite",
@@ -169,6 +173,28 @@ describe("pickLatest with minimumReleaseAge", () => {
       version: "8.3.5",
       heldBackByAge: false,
     });
+  });
+
+  it("offers an excluded package's newest version but flags it as younger than the minimum age", async () => {
+    const ws = await workspaceWith({ dependencies: { vite: "8.3.4" } }, pnpmLock({ vite: "8.3.4" }), ageYaml("vite"));
+    const [entry] = (await computeOutdated(ws, fakeRegistry([doc]), { now: NOW })).entries;
+    expect(entry).toMatchObject({
+      latest: "8.3.5",
+      heldBackByAge: false,
+      newerThanReleaseAge: { publishedAt: daysAgo(0.2), minAgeMinutes: 1440 },
+    });
+  });
+
+  it("doesn't flag a version that is old enough", async () => {
+    const old = packument(
+      "vite",
+      { "8.3.4": { time: daysAgo(9) }, "8.3.5": { time: daysAgo(5) } },
+      { latest: "8.3.5" },
+    );
+    const ws = await workspaceWith({ dependencies: { vite: "8.3.4" } }, pnpmLock({ vite: "8.3.4" }), ageYaml("vite"));
+    const [entry] = (await computeOutdated(ws, fakeRegistry([old]), { now: NOW })).entries;
+    expect(entry?.latest).toBe("8.3.5");
+    expect(entry?.newerThanReleaseAge).toBeUndefined();
   });
 });
 

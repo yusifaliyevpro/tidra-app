@@ -1,9 +1,10 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Check, ChevronDown, Cloud, GitBranch, Plus } from "lucide-react";
+import { Check, ChevronDown, Cloud, GitBranch, GitBranchPlus, Plus } from "lucide-react";
 import { useState } from "react";
 import { useServices } from "@/app/services";
 import type { GitStatus } from "@/engine/git";
 import { listBranches, switchBranch } from "@/services/repos";
+import { freshBranchName } from "@/services/updates";
 import { MenuItem, Popover } from "@/ui/popover";
 import { Spinner } from "@/ui/spinner";
 import { toast, toastError } from "@/ui/toast";
@@ -70,6 +71,7 @@ function BranchList({
   const query = filter.trim();
   const shown = (branches.data ?? []).filter((b) => b.name.toLowerCase().includes(query.toLowerCase()));
   const canCreate = query && VALID_BRANCH.test(query) && !(branches.data ?? []).some((b) => b.name === query);
+  const fresh = freshBranchName((branches.data ?? []).map((b) => b.name));
   const pick = (name: string, create = false) => {
     if (name !== current || create) change.mutate({ name, create });
     else onDone();
@@ -99,6 +101,14 @@ function BranchList({
           <div className="flex justify-center p-3">
             <Spinner />
           </div>
+        ) : null}
+        {!query && branches.data ? (
+          <MenuItem disabled={change.isPending} onSelect={() => pick(fresh, true)}>
+            <GitBranchPlus className="size-3.5 shrink-0" />
+            <span className="truncate">
+              New branch <span className="font-mono text-sm text-muted">{fresh}</span>
+            </span>
+          </MenuItem>
         ) : null}
         {branches.error ? <p className="px-2 py-2 text-sm text-bad">{branches.error.message}</p> : null}
         {shown.map((branch) => (

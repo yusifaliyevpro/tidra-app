@@ -195,13 +195,42 @@ describe("runUpdate", () => {
     expect(steps).toContain("write:skipped");
   });
 
-  it("refuses a dirty tree", async () => {
+  it("updates beside unrelated uncommitted work and leaves it out of what revert restores", async () => {
     const dirty = `${CLEAN}1 .M N... 100644 100644 100644 a b src/a.ts\n`;
-    const io = memoryIo({ "/r/package.json": ROOT_PKG }, { run: gitRunner(dirty) });
+    const diffs = ["src/a.ts\n", "src/a.ts\npackage.json\n"];
+    const io = memoryIo(
+      { "/r/package.json": ROOT_PKG },
+      {
+        run: (program, args) =>
+          program === "git" && args[0] === "diff" ? ok(diffs.shift() ?? "") : gitRunner(dirty)(program, args),
+      },
+    );
     const ws = await loadWorkspace(io, "/r");
-    const refused = await runUpdate(io, ws, [react], { checks: [] });
-    expect(refused).toMatchObject({ ok: false, failedStep: "preflight" });
-    expect(io.files.get("/r/package.json")).toBe(ROOT_PKG);
+    const result = await runUpdate(io, ws, [react], { checks: [] });
+    expect(result.ok).toBe(true);
+    expect(result.touched).toEqual(["package.json"]);
+    expect(result.restore).toBeUndefined();
+    expect(result.otherWork).toEqual(["src/a.ts"]);
+  });
+
+  it("puts a package file edited before the update back as the user left it on revert", async () => {
+    const edited = ROOT_PKG.replace('"name": "app"', '"name": "mine"');
+    const dirty = `${CLEAN}1 .M N... 100644 100644 100644 a b package.json\n`;
+    const io = memoryIo(
+      { "/r/package.json": edited },
+      {
+        run: (program, args) =>
+          program === "git" && args[0] === "diff" ? ok("package.json\n") : gitRunner(dirty)(program, args),
+      },
+    );
+    const ws = await loadWorkspace(io, "/r");
+    const result = await runUpdate(io, ws, [react], { checks: [] });
+    expect(result.restore).toEqual([{ path: "package.json", text: edited }]);
+    await io.writeText("/r/package.json", "rewritten by npm");
+    io.runs.length = 0;
+    await revertUpdate(io, ws, result);
+    expect(io.files.get("/r/package.json")).toBe(edited);
+    expect(io.runs.some((r) => r.args[0] === "checkout")).toBe(false);
   });
 
   it("stops at a failing check and keeps what was written for review", async () => {

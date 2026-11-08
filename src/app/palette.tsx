@@ -1,11 +1,12 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Command } from "cmdk";
-import { ArrowLeft, ArrowUpCircle, FolderGit2, Package, Pause, Play, RefreshCw } from "lucide-react";
+import { ArrowLeft, ArrowUpCircle, Bug, FolderGit2, Package, Pause, Play, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import semver from "semver";
 import type { ProjectWithPath } from "@/core/store";
 import { projectLink } from "@/modules/links";
+import { issueDraft } from "@/services/issue-draft";
 import { refreshProject, type ProjectReport } from "@/services/projects";
 import { startBatch } from "@/services/updates";
 import { toast, toastError } from "@/ui/toast";
@@ -223,6 +224,14 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
                 onSelect={() => run(() => svc.scheduler.setPaused(!paused))}
               >
                 {paused ? "Resume background checks" : "Pause background checks"}
+              </Item>
+              <Item
+                value="report an issue bug feature request"
+                icon={<Bug />}
+                hint="Ctrl Shift B"
+                onSelect={() => run(issueDraft.open)}
+              >
+                Report an issue
               </Item>
             </Command.Group>
           </>

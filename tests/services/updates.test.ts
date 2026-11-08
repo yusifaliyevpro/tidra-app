@@ -3,6 +3,7 @@ import { runs } from "@/core/db/schema";
 import type { RunResult } from "@/engine/io";
 import {
   branchName,
+  freshBranchName,
   finishInterruptedRuns,
   listRuns,
   revertRun,
@@ -125,6 +126,16 @@ describe("branchName", () => {
   it("stamps the UTC date and minute", () => {
     expect(branchName(new Date("2026-11-04T09:05:59Z"))).toBe("tidra/deps-20261104-0905");
     expect(branchName(new Date("2026-11-04T09:05:00Z"), "tidra/actions-")).toBe("tidra/actions-20261104-0905");
+  });
+});
+
+describe("freshBranchName", () => {
+  it("adds a number when the stamped name is taken", () => {
+    const now = new Date("2026-11-04T09:05:00Z");
+    expect(freshBranchName(["main"], now)).toBe("tidra/deps-20261104-0905");
+    expect(freshBranchName(["tidra/deps-20261104-0905", "tidra/deps-20261104-0905-2"], now)).toBe(
+      "tidra/deps-20261104-0905-3",
+    );
   });
 });
 
