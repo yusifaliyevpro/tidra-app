@@ -14,5 +14,6 @@ src-tauri/gen/schemas
 # Editors and agents
 .DS_Store
 .idea
-.claude
+.claude/*
+!.claude/settings.json
 .agents
