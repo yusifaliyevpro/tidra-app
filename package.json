@@ -49,7 +49,7 @@
     "cn": "0.5.2",
     "dompurify": "3.4.17",
     "drizzle-orm": "0.45.4",
-    "hash-wasm": "4.12.0",
+    "hash-wasm": "4.13.0",
     "jsonc-parser": "3.3.1",
     "lucide-react": "1.70.0",
     "marked": "18.1.3",
