@@ -25,6 +25,7 @@ import { ErrorBoundary } from "@/ui/error-boundary";
 import { openExternal, openFolder, openInVsCode } from "@/ui/external";
 import { Chip, Empty, Page } from "@/ui/layout";
 import { MenuItem, MenuSeparator, Popover } from "@/ui/popover";
+import { tableColumns } from "@/ui/table-columns";
 import { toast, toastError } from "@/ui/toast";
 
 const FILTERS = ["all", "changes", "unpushed", "behind", "ci", "actions"] as const;
@@ -149,6 +150,7 @@ function Repos() {
         <div className="pb-6">
           <div
             className={cn(COLS, "sticky top-0 z-10 h-[30px] border-b border-line bg-canvas px-5 text-sm text-muted")}
+            style={COLUMNS}
           >
             <span />
             <span>Repository</span>
@@ -190,7 +192,8 @@ function Repos() {
   );
 }
 
-const COLS = "grid grid-cols-[16px_minmax(0,1fr)_200px_140px_150px_150px_90px_150px] items-center gap-x-3";
+const COLS = "grid items-center gap-x-3";
+const COLUMNS = tableColumns(["16px", "1fr", "200px", "140px", "150px", "150px", "90px", "150px"], 160);
 
 function RepoRow({
   row,
@@ -217,6 +220,7 @@ function RepoRow({
         "group h-10 border-b border-line px-5 transition-colors duration-[80ms] hover:bg-hover",
         open && "bg-selected",
       )}
+      style={COLUMNS}
     >
       <button
         type="button"
@@ -337,7 +341,10 @@ function LocalChanges({ git }: { git: GitStatus }) {
 
 function RepoDetail({ row }: { row: RepoRowData }) {
   return (
-    <div className="grid grid-cols-2 gap-8 border-b border-line bg-hover px-12 py-4">
+    <div
+      className="grid grid-cols-2 gap-8 border-b border-line bg-hover px-12 py-4"
+      style={{ minWidth: COLUMNS.minWidth }}
+    >
       <section className="flex min-w-0 flex-col gap-1">
         <h3 className="text-sm font-medium text-muted">CI</h3>
         {row.ci ? <CiRuns entry={row.ci} /> : <p className="py-2 text-sm text-faint">Not on GitHub</p>}
