@@ -202,3 +202,7 @@ Bump `version` in `package.json`, update the README's download links to the same
 ## Release signing
 
 The updater public key is in `src-tauri/tauri.conf.json`. The private key is **not** in the repo (the author keeps a password-protected key at `~/.tauri/tidra.key`). `pnpm build` runs `pnpm --env-file .env.local tauri build`, which loads `TAURI_SIGNING_PRIVATE_KEY` (key path or contents) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` from a gitignored `.env.local` (see `.env.example`). CI reads the same names from repository secrets; there the key must be the file's contents, not a path.
+
+## Issue agent
+
+`.github/workflows/claude.yml` runs Claude Code on GitHub when the owner assigns themselves to an issue: it fixes the issue on a `claude/` branch and opens a pull request that says `Fixes #N`. Commenting `@claude …` on the issue or that pull request asks for more changes; only the owner's actions start a run. It verifies with the TypeScript checks only (Linux, no display); Windows CI on the pull request runs the Rust ones. It never merges and never bumps the version. It authenticates with the `CLAUDE_CODE_OAUTH_TOKEN` repository secret (`claude setup-token`).
