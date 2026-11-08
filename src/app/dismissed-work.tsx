@@ -1,11 +1,16 @@
 import { CircleCheck, CircleX, X } from "lucide-react";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { ProcessDialog, useProcessList } from "@/modules/process-dialog";
-import { UpdateRunDialog } from "@/modules/projects/update-run";
 import { dismissedWork, type DismissedWork } from "@/services/dismissed";
 import { subscribeRun } from "@/services/updates";
 import { Spinner } from "@/ui/spinner";
+import { useProcessList } from "./queries";
+
+// The dialogs load when one is reopened, not with the header.
+const UpdateRunDialog = lazy(() =>
+  import("@/modules/projects/update-run").then((m) => ({ default: m.UpdateRunDialog })),
+);
+const ProcessDialog = lazy(() => import("@/modules/process-dialog").then((m) => ({ default: m.ProcessDialog })));
 
 type State = "running" | "ok" | "failed";
 
@@ -77,7 +82,7 @@ function ReopenedDialog({
   setOpen: (work?: DismissedWork) => void;
 }) {
   return (
-    <>
+    <Suspense fallback={null}>
       {open?.kind === "run" ? (
         <UpdateRunDialog
           runId={open.id}
@@ -94,6 +99,6 @@ function ReopenedDialog({
           onRestarted={(id) => setOpen({ kind: "process", id, label: open.label })}
         />
       ) : null}
-    </>
+    </Suspense>
   );
 }

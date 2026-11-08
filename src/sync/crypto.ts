@@ -1,5 +1,3 @@
-import { argon2id } from "hash-wasm";
-
 export interface KdfParams {
   algorithm: "argon2id";
   memoryKiB: number;
@@ -35,6 +33,8 @@ export async function deriveKeyBytes(
   salt: Uint8Array,
   params: KdfParams,
 ): Promise<Uint8Array<ArrayBuffer>> {
+  // hash-wasm loads only when a vault is unlocked or created.
+  const { argon2id } = await import("hash-wasm");
   const hash = await argon2id({
     password: password.normalize("NFKC"),
     salt,

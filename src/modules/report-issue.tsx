@@ -5,7 +5,7 @@ import { cn } from "cn";
 import { ImagePlus, X } from "lucide-react";
 import { useId, useRef, useState, useSyncExternalStore, type ClipboardEvent, type DragEvent } from "react";
 import { ACCENT_SETTING, DEFAULT_ACCENT } from "@/app/desktop";
-import { useSetting, useSyncStatus } from "@/app/queries";
+import { useGhState, useSetting, useSyncStatus } from "@/app/queries";
 import { useServices } from "@/app/services";
 import { THEME_SETTING, THEMES } from "@/app/theme";
 import { inTauri } from "@/core/native";
@@ -14,7 +14,6 @@ import { issueDraft } from "@/services/issue-draft";
 import {
   createIssue,
   GH_ATTACH_VERSION,
-  ghState,
   ISSUE_KINDS,
   type GhState,
   type IssueKind,
@@ -42,18 +41,11 @@ const readDataUrl = (file: File) =>
 /** Files a bug, regression or feature request on Tidra's GitHub repo through the user's GitHub CLI. */
 export function ReportIssueDialog() {
   const { open } = useSyncExternalStore(issueDraft.subscribe, issueDraft.snapshot);
-  useGh();
   return (
     <Dialog open={open} onClose={issueDraft.close} title="Report an issue" className="w-[720px]" footer={<Footer />}>
       {open ? <ReportIssueBody /> : null}
     </Dialog>
   );
-}
-
-/** Checked in the background from app start, so the dialog opens with the answer instead of a spinner. */
-function useGh() {
-  const svc = useServices();
-  return useQuery({ queryKey: ["gh-state"], queryFn: () => ghState(svc.io), staleTime: 5 * 60_000, enabled: inTauri });
 }
 
 /** Settings that change how Tidra behaves, sent with every issue. */
@@ -102,7 +94,7 @@ function useSubmit(attach: boolean) {
 
 function Footer() {
   const { draft } = useSyncExternalStore(issueDraft.subscribe, issueDraft.snapshot);
-  const gh = useGh();
+  const gh = useGhState();
   const submit = useSubmit(gh.data?.state === "ready" && gh.data.attach);
   return (
     <>
@@ -188,7 +180,7 @@ function GhNotice({
 
 function ReportIssueBody() {
   const { draft } = useSyncExternalStore(issueDraft.subscribe, issueDraft.snapshot);
-  const gh = useGh();
+  const gh = useGhState();
   return (
     <div className="flex flex-col gap-4">
       <GhNotice

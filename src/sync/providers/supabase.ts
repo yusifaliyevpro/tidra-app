@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import * as z from "@zod/mini";
 import { SyncSetupError, type EncryptedRow, type SyncProvider } from "../provider";
 import { VaultHeaderSchema } from "../vault";
@@ -74,29 +74,34 @@ export const supabase: SyncProvider = {
   connect(config, fetcher) {
     if (!config.url || !config.serviceKey) throw new SyncSetupError("Enter the project URL and service-role key.");
     let client: SupabaseClient | undefined;
-    const db = () =>
-      (client ??= createClient(config.url ?? "", config.serviceKey ?? "", {
+    // The client loads on first use, so people who never sync don't load it at launch.
+    const db = async () => {
+      const { createClient } = await import("@supabase/supabase-js");
+      return (client ??= createClient(config.url ?? "", config.serviceKey ?? "", {
         auth: { persistSession: false, autoRefreshToken: false },
         global: { fetch: fetcher },
       }));
+    };
 
     return {
       async ensureSchema() {
-        const { error } = await db().from("tidra_vault").select("id").limit(1);
+        const { error } = await (await db()).from("tidra_vault").select("id").limit(1);
         check(error);
       },
       async readHeader() {
-        const { data, error } = await db().from("tidra_vault").select("header").eq("id", 1).maybeSingle();
+        const { data, error } = await (await db()).from("tidra_vault").select("header").eq("id", 1).maybeSingle();
         check(error);
         const header: unknown = data?.header;
         return z.validate(VaultHeaderSchema, header) ? header : undefined;
       },
       async writeHeader(header) {
-        const { error } = await db().from("tidra_vault").upsert({ id: 1, header });
+        const { error } = await (await db()).from("tidra_vault").upsert({ id: 1, header });
         check(error);
       },
       async pull(since, limit) {
-        const { data, error } = await db()
+        const { data, error } = await (
+          await db()
+        )
           .from("tidra_rows")
           .select("table_hash, id, nonce, ciphertext, hlc, deleted, device_id")
           .gt("hlc", since)
@@ -126,7 +131,7 @@ export const supabase: SyncProvider = {
           deleted: row.deleted,
           device_id: row.deviceId,
         }));
-        const { error } = await db().rpc("tidra_push", { rows: payload });
+        const { error } = await (await db()).rpc("tidra_push", { rows: payload });
         check(error);
       },
     };
