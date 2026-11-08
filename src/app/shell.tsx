@@ -1,13 +1,13 @@
 import { Outlet, useRouter } from "@tanstack/react-router";
 import * as z from "@zod/mini";
 import { useEffect, useState } from "react";
-import { ReportIssueDialog } from "@/modules/report-issue";
 import { ErrorBoundary } from "@/ui/error-boundary";
 import { handleMarkdownLinkClick } from "@/ui/external";
 import { Spinner } from "@/ui/spinner";
 import { Toaster } from "@/ui/toaster";
 import { DEFAULT_PALETTE_SHORTCUT, PALETTE_SHORTCUT_SETTING } from "./accelerator";
 import { DismissedWorkChips } from "./dismissed-work";
+import { IssueReporter } from "./issue-reporter";
 import { Palette } from "./palette";
 import { useJobs, useSetting } from "./queries";
 import { useGlobalShortcuts } from "./shortcuts";
@@ -119,7 +119,7 @@ export function Shell() {
         <Palette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       </ErrorBoundary>
       <ErrorBoundary fallback={quiet}>
-        <ReportIssueDialog />
+        <IssueReporter />
       </ErrorBoundary>
       <Toaster />
     </div>

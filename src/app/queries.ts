@@ -1,19 +1,37 @@
 import { useQuery } from "@tanstack/react-query";
 import type * as z from "@zod/mini";
+import { useSyncExternalStore } from "react";
+import { inTauri } from "@/core/native";
 import type { SecretKey } from "@/core/secrets";
 import { readAllActions } from "@/services/actions";
 import type { TimelineItem } from "@/services/changelogs";
 import { readDeploys } from "@/services/deploys";
 import { readBotPulls, readCi, readInbox } from "@/services/github-feed";
 import { dismissedAdvisories, homeSummary, readCiThreshold } from "@/services/home";
+import { ghState } from "@/services/issues";
 import { readPackages } from "@/services/packages";
+import type { ManagedProcess } from "@/services/processes";
 import { fetchAllCheckouts, readAllReports, readReport } from "@/services/projects";
 import { listRepos } from "@/services/repos";
 import { readAllSecurity } from "@/services/security";
 import { readSnapshot } from "@/services/snapshot";
 import { syncStatus } from "@/services/sync";
 import { readToolchain } from "@/services/toolchain";
-import { useServices } from "./services";
+import { useApp, useServices } from "./services";
+
+export function useProcessList(): ManagedProcess[] {
+  const { processes } = useApp();
+  return useSyncExternalStore(
+    (listener) => processes.subscribe(listener),
+    () => processes.snapshot(),
+  );
+}
+
+/** Checked in the background from app start, so Report an issue opens with the answer instead of a spinner. */
+export function useGhState() {
+  const svc = useServices();
+  return useQuery({ queryKey: ["gh-state"], queryFn: () => ghState(svc.io), staleTime: 5 * 60_000, enabled: inTauri });
+}
 
 /** Every hook reads local data only; background jobs refresh it and invalidate these keys. */
 export function useReports() {

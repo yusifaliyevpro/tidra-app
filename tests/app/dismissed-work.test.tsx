@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { DismissedWorkChips } from "@/app/dismissed-work";
@@ -43,7 +43,11 @@ describe("DismissedWorkChips", () => {
       </QueryClientProvider>,
     );
 
-    fireEvent.click(screen.getByTitle("Show output"));
+    // The dialog loads on first use, so it shows once that import settles.
+    await act(async () => {
+      fireEvent.click(screen.getByTitle("Show output"));
+      await import("@/modules/projects/update-run");
+    });
     expect(screen.getByRole("dialog", { name: "Update" })).toBeTruthy();
 
     await userEvent.click(screen.getByRole("button", { name: "Close" }));

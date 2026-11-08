@@ -1,25 +1,27 @@
-import DOMPurify from "dompurify";
-import { marked } from "marked";
-import type { ReactNode } from "react";
+import { Suspense, use, type ReactNode } from "react";
 import { openExternal } from "./external";
+import type * as RenderMarkdown from "./render-markdown";
 
-marked.use({ gfm: true, breaks: false });
+// marked and DOMPurify load with the first note shown, not at launch.
+let renderer: Promise<typeof RenderMarkdown> | undefined;
+const loadRenderer = () => (renderer ??= import("./render-markdown"));
 
-/** Changelog bodies come from third-party repos, so the HTML is sanitized before rendering. */
-function renderMarkdown(source: string): string {
-  return DOMPurify.sanitize(marked.parse(source, { async: false }), {
-    FORBID_TAGS: ["style", "form", "input"],
-    FORBID_ATTR: ["style"],
-  });
-}
-
-export function Markdown({ source, className }: { source: string; className?: string }) {
+function Rendered({ source, className }: { source: string; className?: string }) {
+  const { renderMarkdown } = use(loadRenderer());
   return (
     <div
       className={`markdown ${className ?? ""}`}
       data-selectable
       dangerouslySetInnerHTML={{ __html: renderMarkdown(source) }}
     />
+  );
+}
+
+export function Markdown({ source, className }: { source: string; className?: string }) {
+  return (
+    <Suspense fallback={null}>
+      <Rendered source={source} className={className} />
+    </Suspense>
   );
 }
 

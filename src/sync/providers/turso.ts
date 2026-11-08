@@ -1,4 +1,4 @@
-import { createClient, type Client } from "@libsql/client/web";
+import type { Client } from "@libsql/client/web";
 import * as z from "@zod/mini";
 import { SyncSetupError, type EncryptedRow, type SyncProvider } from "../provider";
 import { VaultHeaderSchema } from "../vault";
@@ -42,27 +42,35 @@ export const turso: SyncProvider = {
   connect(config, fetcher) {
     if (!config.url) throw new SyncSetupError("Enter the database URL.");
     let client: Client | undefined;
-    const db = () => (client ??= createClient({ url: config.url ?? "", authToken: config.authToken, fetch: fetcher }));
+    // The client loads on first use, so people who never sync don't load it at launch.
+    const db = async () => {
+      const { createClient } = await import("@libsql/client/web");
+      return (client ??= createClient({ url: config.url ?? "", authToken: config.authToken, fetch: fetcher }));
+    };
 
     return {
       async ensureSchema() {
-        await db().batch(SCHEMA, "write");
+        await (await db()).batch(SCHEMA, "write");
       },
       async readHeader() {
-        const result = await db().execute("SELECT header FROM tidra_vault WHERE id = 1");
+        const result = await (await db()).execute("SELECT header FROM tidra_vault WHERE id = 1");
         const raw = result.rows[0]?.header;
         if (typeof raw !== "string") return undefined;
         const header: unknown = JSON.parse(raw);
         return z.validate(VaultHeaderSchema, header) ? header : undefined;
       },
       async writeHeader(header) {
-        await db().execute({
+        await (
+          await db()
+        ).execute({
           sql: "INSERT INTO tidra_vault (id, header) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET header = excluded.header",
           args: [JSON.stringify(header)],
         });
       },
       async pull(since, limit) {
-        const result = await db().execute({
+        const result = await (
+          await db()
+        ).execute({
           sql: "SELECT table_hash, id, nonce, ciphertext, hlc, deleted, device_id FROM tidra_rows WHERE hlc > ? ORDER BY hlc LIMIT ?",
           args: [since, limit],
         });
@@ -85,7 +93,9 @@ export const turso: SyncProvider = {
       },
       async push(rows) {
         if (rows.length === 0) return;
-        await db().batch(
+        await (
+          await db()
+        ).batch(
           rows.map((row) => ({
             sql: `INSERT INTO tidra_rows (table_hash, id, nonce, ciphertext, hlc, deleted, device_id)
                   VALUES (?, ?, ?, ?, ?, ?, ?)

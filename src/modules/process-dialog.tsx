@@ -1,5 +1,5 @@
 import { RotateCcw, Square } from "lucide-react";
-import { useSyncExternalStore } from "react";
+import { useProcessList } from "@/app/queries";
 import { useApp } from "@/app/services";
 import { display } from "@/engine/pm";
 import { dismissedWork } from "@/services/dismissed";
@@ -7,14 +7,6 @@ import type { ManagedProcess } from "@/services/processes";
 import { Button } from "@/ui/button";
 import { Dialog } from "@/ui/dialog";
 import { Log } from "@/ui/log";
-
-export function useProcessList(): ManagedProcess[] {
-  const { processes } = useApp();
-  return useSyncExternalStore(
-    (listener) => processes.subscribe(listener),
-    () => processes.snapshot(),
-  );
-}
 
 /** Live output of a started script, right where it was started. Closing keeps it running; Stop ends it. */
 export function ProcessDialog({

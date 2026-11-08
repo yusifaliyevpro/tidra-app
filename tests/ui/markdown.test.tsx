@@ -1,9 +1,9 @@
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Markdown } from "@/ui/markdown";
 
 describe("Markdown", () => {
-  it("renders release notes and strips anything executable", () => {
+  it("renders release notes and strips anything executable", async () => {
     const source = [
       "## Breaking",
       "- Dropped Node 18 ([#12](https://github.com/o/r/pull/12))",
@@ -12,7 +12,12 @@ describe("Markdown", () => {
       '<a href="javascript:alert(3)">bad</a>',
       '<p style="position:fixed">styled</p>',
     ].join("\n");
-    const { container } = render(<Markdown source={source} />);
+    // The renderer loads on first use, so the render waits for it inside act.
+    const { container } = await act(async () => {
+      const result = render(<Markdown source={source} />);
+      await import("@/ui/render-markdown");
+      return result;
+    });
 
     expect(container.querySelector("h2")?.textContent).toBe("Breaking");
     expect(container.querySelector('a[href="https://github.com/o/r/pull/12"]')).not.toBeNull();
