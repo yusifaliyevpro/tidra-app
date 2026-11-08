@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { ArrowDownUp } from "lucide-react";
+import { ArrowDown } from "lucide-react";
 import { useServices } from "@/app/services";
 import type { ForkInfo, GitStatus } from "@/engine/git";
 import { syncRepo } from "@/services/repos";
@@ -7,8 +7,8 @@ import { Button } from "@/ui/button";
 import { toast, toastError } from "@/ui/toast";
 
 /**
- * Fetch, catch up with a fork's upstream, pull and push in one click. Shown only when commits are waiting either way,
- * as of the last fetch (background checks and Fetch keep that fresh).
+ * Takes commits waiting upstream (a fork's upstream, then origin), and pushes local ones on the way. Shown only when
+ * something is coming in; commits that only go out are BranchActions' Push.
  */
 export function SyncButton({
   projectId,
@@ -32,7 +32,7 @@ export function SyncButton({
   const upstream = fork?.ref?.replace(/^upstream\//, "") === git.branch ? (fork?.behind ?? 0) : 0;
   const incoming = git.behind + upstream;
   const outgoing = git.ahead;
-  if (incoming + outgoing === 0) return null;
+  if (incoming === 0) return null;
   const title = [
     incoming > 0 ? `${incoming} to pull` : undefined,
     outgoing > 0 ? `${outgoing} to push` : undefined,
@@ -52,8 +52,9 @@ export function SyncButton({
         sync.mutate();
       }}
     >
-      <span className="tabular">{incoming + outgoing}</span>
-      <ArrowDownUp className="size-3.5" />
+      <ArrowDown className="size-3.5" />
+      <span className="tabular">{incoming}</span>
+      Sync
     </Button>
   );
 }

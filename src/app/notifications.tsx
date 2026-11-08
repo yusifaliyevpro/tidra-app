@@ -2,8 +2,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Bell } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
 import { listNotifications, markAllNotificationsRead, markNotificationRead } from "@/services/notify";
+import { Popover } from "@/ui/popover";
 import { TimeAgo } from "@/ui/time";
 import { toastError } from "@/ui/toast";
 import { useServices } from "./services";
@@ -13,47 +13,32 @@ type Notification = Awaited<ReturnType<typeof listNotifications>>[number];
 /** Title bar bell: the in-app list of everything Tidra noticed, newest first. */
 export function NotificationBell() {
   const svc = useServices();
-  const [open, setOpen] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
   const { data: items = [] } = useQuery({ queryKey: ["notifications"], queryFn: () => listNotifications(svc) });
   const unread = items.filter((n) => !n.read).length;
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onPointer = (event: PointerEvent) => {
-      if (!(event.target instanceof Node && root.current?.contains(event.target))) setOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointerdown", onPointer);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("pointerdown", onPointer);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
   return (
-    <div ref={root} className="relative no-drag">
-      <button
-        type="button"
-        aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
-        aria-expanded={open}
-        title="Notifications"
-        onClick={() => setOpen(!open)}
-        className={cn(
-          "relative flex size-7 items-center justify-center rounded-md text-faint transition-colors hover:bg-hover hover:text-fg",
-          open && "bg-hover text-fg",
-        )}
-      >
-        <Bell className="size-4" />
-        {unread > 0 ? (
-          <span className="absolute top-[5px] right-[5px] size-1.5 rounded-full bg-accent ring-2 ring-canvas" />
-        ) : null}
-      </button>
-      {open ? <NotificationPanel items={items} unread={unread} onClose={() => setOpen(false)} /> : null}
-    </div>
+    <Popover
+      className="max-h-[480px] w-96"
+      renderTrigger={({ open, toggle }) => (
+        <button
+          type="button"
+          aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
+          aria-expanded={open}
+          title="Notifications"
+          onClick={toggle}
+          className={cn(
+            "relative flex size-7 items-center justify-center rounded-md text-faint transition-colors hover:bg-hover hover:text-fg",
+            open && "bg-hover text-fg",
+          )}
+        >
+          <Bell className="size-4" />
+          {unread > 0 ? (
+            <span className="absolute top-[5px] right-[5px] size-1.5 rounded-full bg-accent ring-2 ring-canvas" />
+          ) : null}
+        </button>
+      )}
+    >
+      {(close) => <NotificationPanel items={items} unread={unread} onClose={close} />}
+    </Popover>
   );
 }
 
@@ -68,10 +53,7 @@ function NotificationPanel({ items, unread, onClose }: { items: Notification[]; 
   };
 
   return (
-    <section
-      aria-label="Notifications"
-      className="absolute top-full left-0 z-50 mt-1 flex max-h-[480px] w-96 origin-top-right animate-pop-in flex-col overflow-hidden rounded-lg border border-line-strong bg-raised shadow-pop"
-    >
+    <section aria-label="Notifications" className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-10 shrink-0 items-center border-b border-line px-3">
         <span className="font-medium">Notifications</span>
         <button

@@ -178,13 +178,13 @@ describe("buildTimeline", () => {
     const { svc, close, requests } = await changelogServices({
       releases: () => new Response("{}", { status: 403, headers: { "x-ratelimit-remaining": "0" } }),
     });
-    await svc.store.watchRepo("a", "one");
-    await svc.store.watchRepo("b", "two");
+    for (const repo of ["one", "two", "three", "four", "five", "six"]) await svc.store.watchRepo("a", repo);
     const timeline = await buildTimeline(svc, new Map());
     close();
+    // Four repos are asked at once; the ones still queued when the limit shows up never ask.
     expect(timeline.items).toEqual([]);
-    expect(timeline.errors).toHaveLength(1);
-    expect(requests.filter((url) => url.startsWith("https://api.github.com/"))).toHaveLength(1);
+    expect(timeline.errors).toHaveLength(4);
+    expect(requests.filter((url) => url.startsWith("https://api.github.com/"))).toHaveLength(4);
   });
 });
 

@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { getVersion } from "@tauri-apps/api/app";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
-import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 import * as z from "@zod/mini";
 import { cn } from "cn";
@@ -21,6 +20,7 @@ import {
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { DEFAULT_PALETTE_SHORTCUT, PALETTE_SHORTCUT_SETTING } from "@/app/accelerator";
+import { AppUpdateButton, useAppUpdate } from "@/app/app-update";
 import {
   ACCENT_SETTING,
   applyAppearance,
@@ -44,6 +44,7 @@ import { ShortcutInput } from "@/modules/settings/shortcut-input";
 import { SyncSettings } from "@/modules/settings/sync";
 import { AI_CONFIG_SETTING, readAiConfig } from "@/services/ai";
 import { CI_THRESHOLD_SETTING, readCiThreshold } from "@/services/home";
+import { issueDraft } from "@/services/issue-draft";
 import { JOB_INTERVALS_SETTING, JOBS, readJobIntervals } from "@/services/jobs";
 import { NOTIFICATION_KINDS, NOTIFY_SETTING, readNotifyPrefs } from "@/services/notify";
 import { Button } from "@/ui/button";
@@ -161,15 +162,14 @@ function GeneralPane() {
     onSuccess: () => void autostart.refetch(),
     onError: toastError,
   });
+  const { data: available } = useAppUpdate();
+  // Only looks; installing waits for the user's click on the Update button that appears.
   const update = useMutation({
-    mutationFn: async () => {
-      const found = await check();
-      if (!found) return false;
-      await found.downloadAndInstall();
-      await relaunch();
-      return true;
+    mutationFn: async () => (await check()) ?? null,
+    onSuccess: (found) => {
+      queryClient.setQueryData(["app-update"], found);
+      if (!found) toast("You're on the latest version.");
     },
-    onSuccess: (updated) => !updated && toast("You're on the latest version."),
     onError: toastError,
   });
 
@@ -185,8 +185,17 @@ function GeneralPane() {
             />
           </SettingRow>
           <SettingRow label="Version" description={version.data}>
-            <Button size="sm" loading={update.isPending} onClick={() => update.mutate()}>
-              Check for updates
+            {available ? (
+              <AppUpdateButton />
+            ) : (
+              <Button size="sm" loading={update.isPending} onClick={() => update.mutate()}>
+                Check for updates
+              </Button>
+            )}
+          </SettingRow>
+          <SettingRow label="Found a bug or have an idea?">
+            <Button size="sm" onClick={issueDraft.open}>
+              Report an issue
             </Button>
           </SettingRow>
         </SettingsGroup>

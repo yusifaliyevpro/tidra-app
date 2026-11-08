@@ -20,8 +20,21 @@ export function dismiss(id: number) {
   emit();
 }
 
+export interface RecentError {
+  id: number;
+  at: string;
+  message: string;
+}
+
+const RECENT_ERRORS = 10;
+let errors: RecentError[] = [];
+
+/** The last errors shown this session, newest last, for issue reports; the user picks which to send. */
+export const recentErrors = (): RecentError[] => errors;
+
 export function toast(message: string, tone: Toast["tone"] = "info", action?: ToastAction) {
   const id = nextId++;
+  if (tone === "error") errors = [...errors.slice(1 - RECENT_ERRORS), { id, at: new Date().toISOString(), message }];
   toasts = [...toasts.slice(-3), { id, message, tone, action }];
   emit();
   setTimeout(() => dismiss(id), tone === "error" ? 8000 : action ? 6000 : 4000);

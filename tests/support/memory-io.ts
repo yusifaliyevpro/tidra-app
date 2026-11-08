@@ -49,6 +49,10 @@ export function memoryIo(
     writeText: async (path, contents) => {
       map.set(normalize(path), contents);
     },
+    // Binary files are recorded by size; tests only need to know they were written.
+    writeBytes: async (path, bytes) => {
+      map.set(normalize(path), `[${bytes.length} bytes]`);
+    },
     exists: async (path) => map.has(normalize(path)) || dirs().has(normalize(path)),
     readDir: async (path) => {
       const base = normalize(path);

@@ -22,6 +22,7 @@ export interface DirEntry {
 export interface Io {
   readText(path: string): Promise<string | null>;
   writeText(path: string, contents: string): Promise<void>;
+  writeBytes(path: string, bytes: Uint8Array): Promise<void>;
   readDir(path: string): Promise<DirEntry[]>;
   exists(path: string): Promise<boolean>;
   run(program: string, args: string[], options?: RunOptions): Promise<RunResult>;

@@ -1,6 +1,7 @@
 import { cn } from "cn";
 import { X } from "lucide-react";
 import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useBackdropClose } from "./backdrop";
 import { IconButton } from "./button";
 
 /** Native <dialog> as a modal: focus trapping, Esc and the backdrop come from the platform. */
@@ -28,18 +29,14 @@ export function Dialog({
     if (open && !el.open) el.showModal();
     if (!open && el.open) el.close();
   }, [open]);
+  useBackdropClose(ref, onClose);
 
   return (
-    // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions -- Esc already closes it; this adds backdrop clicks
     <dialog
       ref={ref}
       aria-labelledby={titleId}
       onClose={onClose}
       onCancel={onClose}
-      // A click on the backdrop lands on the <dialog> itself; clicks inside land on its content.
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
       className={cn(
         "m-auto max-h-[85vh] w-[520px] max-w-[92vw] animate-dialog-in rounded-xl border border-line-strong bg-raised p-0 text-fg shadow-dialog backdrop:bg-scrim",
         className,

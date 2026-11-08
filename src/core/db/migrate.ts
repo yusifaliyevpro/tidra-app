@@ -22,6 +22,8 @@ export async function migrate(driver: SqlDriver, migrations: Migration[]): Promi
     if (applied.has(migration.tag)) continue;
     const statements = migration.sql.replaceAll("--> statement-breakpoint", "");
     const tag = migration.tag.replaceAll("'", "''");
+    // In order: each migration builds on the schema the previous one left.
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop
     await driver.script(
       `${statements}\nINSERT INTO __migrations (tag, applied_at) VALUES ('${tag}', '${new Date().toISOString()}');`,
     );

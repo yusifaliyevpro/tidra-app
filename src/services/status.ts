@@ -13,11 +13,10 @@ export const STATUS_LABEL: Record<Status, string> = {
 
 type HealthLike = Pick<ProjectHealth, "updates" | "security" | "failsAudit" | "error">;
 
-/** One state per project, riskiest wins: an advisory outranks a major update, which outranks minor ones. */
+/** A project's update state, riskiest wins. Advisories have their own column and screen, so they don't change it. */
 export function projectStatus(health: HealthLike | undefined, checking = false): Status {
   if (checking) return "checking";
   if (!health || health.error) return "off";
-  if (health.failsAudit || health.security.critical + health.security.high > 0) return "alert";
   if (health.updates.major > 0) return "major";
   if (health.updates.minor + health.updates.patch > 0) return "minor";
   return "ok";

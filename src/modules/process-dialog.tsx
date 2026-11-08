@@ -2,6 +2,7 @@ import { RotateCcw, Square } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useApp } from "@/app/services";
 import { display } from "@/engine/pm";
+import { dismissedWork } from "@/services/dismissed";
 import type { ManagedProcess } from "@/services/processes";
 import { Button } from "@/ui/button";
 import { Dialog } from "@/ui/dialog";
@@ -27,13 +28,19 @@ export function ProcessDialog({
 }) {
   const list = useProcessList();
   const proc = list.find((p) => p.id === processId);
+  // Closing while it runs leaves a chip in the header that brings this dialog back.
+  const close = () => {
+    if (proc?.running) dismissedWork.add({ kind: "process", id: proc.id, label: proc.label });
+    else if (proc) dismissedWork.remove(proc.id);
+    onClose();
+  };
   return (
     <Dialog
       open={Boolean(processId)}
-      onClose={onClose}
+      onClose={close}
       title={proc?.label ?? "Script"}
       className="w-[860px]"
-      footer={proc ? <ProcessActions proc={proc} onClose={onClose} onRestarted={onRestarted} /> : null}
+      footer={proc ? <ProcessActions proc={proc} onClose={close} onRestarted={onRestarted} /> : null}
     >
       <div className="flex flex-col gap-2">
         {proc ? <ProcessState proc={proc} /> : null}

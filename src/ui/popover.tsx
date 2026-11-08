@@ -1,5 +1,5 @@
 import { cn } from "cn";
-import { useEffect, useEffectEvent, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 /**
@@ -19,14 +19,18 @@ export function Popover({
 }) {
   const anchor = useRef<HTMLSpanElement>(null);
   const panel = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState<{ top: number; left: number; right: number }>();
+  const [position, setPosition] = useState<{ top: number; left: number; right: number; anchorTop: number }>();
   const open = position !== undefined;
   const close = () => setPosition(undefined);
   const toggle = (event: MouseEvent<HTMLElement>) => {
     if (open) return close();
     const rect = event.currentTarget.getBoundingClientRect();
-    setPosition({ top: rect.bottom + 4, left: rect.left, right: window.innerWidth - rect.right });
+    setPosition({ top: rect.bottom + 4, left: rect.left, right: window.innerWidth - rect.right, anchorTop: rect.top });
   };
+
+  useLayoutEffect(() => {
+    if (panel.current && position) keepInWindow(panel.current, position.anchorTop);
+  }, [position]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -87,6 +91,21 @@ export function Popover({
   );
 }
 
+const EDGE = 8;
+
+/** Shifts a fixed panel back inside the window, and flips it above its trigger when there is no room below. */
+function keepInWindow(el: HTMLElement, anchorTop: number) {
+  // Layout boxes, not getBoundingClientRect: the opening animation scales the panel down.
+  const { offsetLeft: left, offsetTop: top, offsetWidth: width, offsetHeight: height } = el;
+  const maxLeft = window.innerWidth - EDGE - width;
+  if (left > maxLeft || left < EDGE) {
+    el.style.left = `${Math.max(EDGE, Math.min(left, maxLeft))}px`;
+    el.style.right = "auto";
+  }
+  if (top + height > window.innerHeight - EDGE && anchorTop - 4 - height >= EDGE)
+    el.style.top = `${anchorTop - 4 - height}px`;
+}
+
 /** A row in a popover menu. */
 export function MenuItem({
   onSelect,
@@ -107,7 +126,7 @@ export function MenuItem({
       disabled={disabled}
       onClick={onSelect}
       className={cn(
-        "flex h-[30px] w-full shrink-0 items-center gap-2 rounded-md px-2 text-left text-base text-fg hover:bg-hover focus-visible:bg-hover focus-visible:outline-none disabled:opacity-45 [&>svg]:text-muted",
+        "flex h-[30px] w-full shrink-0 items-center gap-2 rounded-md px-2 text-left text-base whitespace-nowrap text-fg hover:bg-hover focus-visible:bg-hover focus-visible:outline-none disabled:opacity-45 [&>svg]:text-muted",
         active && "bg-selected",
         className,
       )}

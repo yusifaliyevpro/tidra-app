@@ -17,6 +17,10 @@ export function nodeIo(env: Record<string, string>): Io & { settled(): Promise<v
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, contents);
     },
+    writeBytes: async (path, bytes) => {
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, bytes);
+    },
     exists: async (path) => existsSync(path),
     readDir: async (path) =>
       (await readdir(path, { withFileTypes: true })).map((entry) => ({ name: entry.name, isDir: entry.isDirectory() })),

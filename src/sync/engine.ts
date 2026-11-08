@@ -149,10 +149,9 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
     if (last) await setKv(deps.driver, PUSH_CURSOR, last.hlc);
   }
 
-  const tables = new Map<string, TableMeta>();
-  for (const meta of [...SYNCED_TABLE_META, { name: SECRETS_TABLE, columns: [] }]) {
-    tables.set(await deps.vault.tableHash(meta.name), meta);
-  }
+  const metas: TableMeta[] = [...SYNCED_TABLE_META, { name: SECRETS_TABLE, columns: [] }];
+  const hashes = await Promise.all(metas.map((meta) => deps.vault.tableHash(meta.name)));
+  const tables = new Map(metas.map((meta, i) => [hashes[i] ?? "", meta]));
 
   let cursor = await getKv(deps.driver, PULL_CURSOR);
   for (;;) {

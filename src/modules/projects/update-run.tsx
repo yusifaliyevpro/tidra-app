@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useReport } from "@/app/queries";
 import { useServices } from "@/app/services";
 import { UPDATE_STEPS, type UpdateResult, type UpdateStep } from "@/engine/apply";
+import { dismissedWork } from "@/services/dismissed";
 import { revertRun, subscribeRun, type RunProgress } from "@/services/updates";
 import { Button } from "@/ui/button";
 import { Dialog } from "@/ui/dialog";
@@ -29,16 +30,26 @@ export function UpdateRunDialog({
   runId,
   projectId,
   path,
-  onClose,
+  name,
+  onClose: dismiss,
 }: {
   runId: string | undefined;
   projectId: string;
   path?: string;
+  /** Project name for the header chip that brings the dialog back. */
+  name?: string;
   onClose: () => void;
 }) {
   const [progress, setProgress] = useState<RunProgress>();
   useEffect(() => (runId ? subscribeRun(runId, setProgress) : undefined), [runId]);
   const result = progress?.result;
+  const onClose = () => {
+    if (runId && !result) {
+      const label = name ? `Updating ${name}` : "Updating";
+      dismissedWork.add({ kind: "run", id: runId, label, projectId, path });
+    } else if (runId) dismissedWork.remove(runId);
+    dismiss();
+  };
 
   return (
     <Dialog
@@ -169,7 +180,6 @@ function StepDot({ state }: { state: StepState }) {
 const NEXT_STEP: Partial<Record<UpdateStep, string>> = {
   checks: "Fix what failed in your editor and run the checks again, then commit. Or revert to undo the update.",
   install: "The package manager could not install the new versions. Revert, or fix it and Commit & Push.",
-  preflight: "Commit or stash your local changes, then run the update again.",
 };
 
 function Failure({ result }: { result: UpdateResult }) {

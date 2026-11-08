@@ -14,18 +14,14 @@ describe("projectStatus", () => {
     expect(projectStatus(health({ error: "No package.json" }))).toBe("off");
   });
 
-  it("puts advisories above major updates", () => {
+  it("shows update state only, whatever the advisories", () => {
     const h = health({
       updates: { major: 3, minor: 0, patch: 0 },
+      failsAudit: true,
       security: { critical: 0, high: 1, moderate: 0, low: 0, total: 1 },
     });
-    expect(projectStatus(h)).toBe("alert");
-  });
-
-  it("counts a failing audit as an alert even without high advisories", () => {
-    expect(
-      projectStatus(health({ failsAudit: true, security: { critical: 0, high: 0, moderate: 2, low: 0, total: 2 } })),
-    ).toBe("alert");
+    expect(projectStatus(h)).toBe("major");
+    expect(projectStatus(health({ failsAudit: true }))).toBe("ok");
   });
 
   it("ranks major over minor and patch", () => {

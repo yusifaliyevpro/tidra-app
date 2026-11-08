@@ -1,12 +1,6 @@
 import { cn } from "cn";
 import { ChevronDown } from "lucide-react";
-import {
-  useId,
-  type InputHTMLAttributes,
-  type ReactNode,
-  type SelectHTMLAttributes,
-  type TextareaHTMLAttributes,
-} from "react";
+import { useId, type ComponentProps, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from "react";
 
 const CONTROL =
   "w-full rounded-md border border-line-strong bg-surface px-2.5 text-base text-fg placeholder:text-faint transition-colors duration-[80ms] focus:border-focus focus:outline-none disabled:opacity-45 aria-invalid:border-bad";
@@ -15,7 +9,7 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
   return <input className={cn(CONTROL, "h-7", className)} spellCheck={false} {...props} />;
 }
 
-export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
   return (
     <textarea className={cn(CONTROL, "min-h-20 py-1.5 font-mono text-sm", className)} spellCheck={false} {...props} />
   );

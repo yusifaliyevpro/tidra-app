@@ -239,8 +239,10 @@ const withGitInfo = (report: ProjectReport, [git, branches, fork]: GitInfo): Pro
  */
 export async function writeGitState(svc: Services, root: string, projectIds: string[]): Promise<boolean> {
   gitEpochs.set(root, gitEpoch(root) + 1);
-  const info = await gitInfoAt(svc, root);
-  const reports = await readSnapshots<ProjectReport>(svc, projectIds.map(reportKey));
+  const [info, reports] = await Promise.all([
+    gitInfoAt(svc, root),
+    readSnapshots<ProjectReport>(svc, projectIds.map(reportKey)),
+  ]);
   const fresh = JSON.stringify(info);
   const stale = projectIds.flatMap((id, i) => {
     const report = reports[i];

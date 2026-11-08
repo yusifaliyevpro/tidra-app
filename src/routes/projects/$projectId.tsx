@@ -19,7 +19,7 @@ import { UpdateRunDialog } from "@/modules/projects/update-run";
 import { fetchProject, refreshProject } from "@/services/projects";
 import { hasUncommittedUpdate } from "@/services/pull-requests";
 import { projectStatus } from "@/services/status";
-import { listRuns } from "@/services/updates";
+import { listRuns, subscribeRun } from "@/services/updates";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { openExternal, openFolder, openInVsCode } from "@/ui/external";
@@ -147,7 +147,13 @@ function ProjectPage() {
         </div>
       </div>
       <Properties project={project} report={report} ci={health?.ci} />
-      <UpdateRunDialog runId={runId} projectId={project.id} path={project.path} onClose={() => setRunId(undefined)} />
+      <UpdateRunDialog
+        runId={runId}
+        projectId={project.id}
+        path={project.path}
+        name={project.name}
+        onClose={() => setRunId(undefined)}
+      />
     </Page>
   );
 }
@@ -173,6 +179,7 @@ function HeaderActions({ project, report }: { project: Project; report: Report |
       >
         Check again
       </Button>
+      <SyncButton projectId={project.id} git={report?.git} fork={report?.fork} />
       <BranchActions projectId={project.id} git={report?.git} allowCommit={uncommitted} size="sm" />
     </>
   );
@@ -256,7 +263,6 @@ function ProjectTools({ project, report }: { project: Project; report: Report | 
           Open folder
         </Button>
       ) : null}
-      <SyncButton projectId={project.id} git={report?.git} fork={report?.fork} />
       {path && (report?.checks.length ?? 0) > 0 ? <RunChecksButton projectId={project.id} /> : null}
     </div>
   );
@@ -409,6 +415,14 @@ function GitTab({ report }: { report: Report }) {
   );
 }
 
+/** A run started in this session streams its output; older ones show what was saved when they finished. */
+function RunLog({ runId, saved }: { runId: string; saved: string }) {
+  const [live, setLive] = useState<string>();
+  useEffect(() => subscribeRun(runId, (progress) => setLive(progress.log)), [runId]);
+  const text = live && live.length >= saved.length ? live : saved;
+  return <Log text={text} className="max-h-96" />;
+}
+
 function RunHistory({ projectId }: { projectId: string }) {
   const { svc } = useApp();
   const { data: runs } = useQuery({ queryKey: ["runs", projectId], queryFn: () => listRuns(svc, projectId) });
@@ -436,7 +450,7 @@ function RunHistory({ projectId }: { projectId: string }) {
           </button>
           {open === run.id ? (
             <div className="px-5 pb-3">
-              <Log text={run.log} className="max-h-96" />
+              <RunLog runId={run.id} saved={run.log} />
             </div>
           ) : null}
         </div>

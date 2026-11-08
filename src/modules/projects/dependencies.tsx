@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowRight, Clock } from "lucide-react";
 import { useId, useState } from "react";
 import { useServices } from "@/app/services";
 import { useListKeys } from "@/app/shortcuts";
-import type { OutdatedEntry } from "@/engine/outdated";
+import { releaseAgeNote, type OutdatedEntry } from "@/engine/outdated";
 import type { Bump } from "@/engine/versions";
 import { ChangelogPanel } from "@/modules/changelog-panel";
 import type { ProjectReport } from "@/services/projects";
@@ -221,6 +221,7 @@ function DependencyRow({
     >
       <label htmlFor={id} className="flex h-full shrink-0 items-center pr-2.5 pl-4">
         <Checkbox id={id} label={`Select ${entry.name}`} checked={picked} onChange={() => onToggle([rowKey])} />
+        <span className="sr-only">Select {entry.name}</span>
       </label>
       <button
         type="button"
@@ -234,6 +235,11 @@ function DependencyRow({
         ) : null}
         {entry.heldBackByAge ? (
           <Clock className="size-3.5 text-faint" aria-label="Newer versions are younger than minimumReleaseAge" />
+        ) : null}
+        {entry.newerThanReleaseAge && target === entry.latest ? (
+          <span title={releaseAgeNote(entry.newerThanReleaseAge)} className="flex">
+            <Clock className="size-3.5 text-warn" aria-label={releaseAgeNote(entry.newerThanReleaseAge)} />
+          </span>
         ) : null}
         <Mono className="text-muted">{entry.current ?? entry.range}</Mono>
         <ArrowRight className="size-3 text-faint" />
@@ -293,6 +299,12 @@ function DependencyDetail({
         {entry.heldBackByAge ? (
           <p className="text-sm text-muted">
             A newer version exists but is younger than this project's minimumReleaseAge.
+          </p>
+        ) : null}
+        {entry.newerThanReleaseAge && target === entry.latest ? (
+          <p className="flex items-center gap-1.5 text-sm text-warn">
+            <Clock className="size-3.5 shrink-0" />
+            {releaseAgeNote(entry.newerThanReleaseAge)}
           </p>
         ) : null}
         {entry.enginesNode ? <p className="text-sm text-muted">Requires Node {entry.enginesNode}</p> : null}

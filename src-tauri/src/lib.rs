@@ -64,6 +64,7 @@ pub fn run() {
             secrets::secret_delete,
             fs::fs_read_text,
             fs::fs_write_text,
+            fs::fs_write_bytes,
             fs::fs_read_dir,
             fs::fs_exists,
             fs::app_env,

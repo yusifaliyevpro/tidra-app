@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guide for AI agents (and humans) working on Tidra. Read this and [STYLE.md](STYLE.md) before changing code.
+Guide for AI agents (and humans) working on Tidra. Read this before changing code, and [STYLE.md](STYLE.md) (the design system) before changing UI.
 
 ## What Tidra is
 
@@ -83,12 +83,12 @@ Rules:
 - **Reads in bulk**: list screens read snapshots with `readSnapshots` (one query), and background writes call `svc.invalidate(...)`, which coalesces query invalidations so a 30-project refresh rerenders once.
 - **Error boundaries**: routes use `RouteError`; panels, chrome and table rows wrap in `ErrorBoundary` (`src/ui/error-boundary.tsx`) so one bad snapshot never blanks a screen. Unhandled promise rejections surface as one toast.
 - **Changelogs** cover only what the user watches (packages in the `watchedPackages` setting, repos in `watched_repos`). Nothing is watched automatically.
-- **Migrations**: the app is unreleased, so schema changes are still folded into `drizzle/0000_init.sql` (delete `drizzle/`, rerun `pnpm db:generate --name init`). After release, add numbered migrations instead.
+- **Migrations**: the app is released, so every schema change is a new numbered migration (`pnpm db:generate --name <what>`); never edit an applied one. Columns other devices may still sync stay until no released version writes them.
 
 ## Native feel (desktop rules)
 
 - The window starts hidden. `revealWindow()` (`src/app/native-feel.ts`) calls the `app_ready` command after the first frame with final fonts; Rust shows it then, or after a 5 s fallback. Autostart (`--hidden`) launches stay in the tray. window-state must not restore visibility.
-- `installNativeFeel()` blocks browser keys (reload, print, find, zoom, view source, history), the browser context menu outside text, and mouse back/forward. Devtools stay available in dev builds.
+- `installNativeFeel()` blocks browser keys (reload, print, find, zoom, view source, history), and the browser context menu outside text. Mouse back/forward and Alt+arrows navigate the app's own history (`useHistoryButtons` in `src/app/shell.tsx`). Devtools stay available in dev builds.
 - CSS: `overscroll-behavior: none` on `html`/`body` only (no rubber-band; on every element it would stop nested lists passing the scroll to the page), `overscroll-contain` on dialogs, menus and the palette, arrow cursor on controls, no image/link dragging, text selectable only in inputs, code, logs and `[data-selectable]`.
 - Spinners fade in after 250 ms (`appear-late`), so quick loads never flash one. Prefetch anything the first frame needs (see the `onboarded` prefetch in `src/main.tsx`).
 - Screens outside the shell (onboarding, startup error, crashed route) render inside `Frame` so the title bar and window buttons are always there. Route errors render in place with the shell intact (`RouteError`).
@@ -114,8 +114,40 @@ Rules:
 - Retry 429/5xx/network with backoff; always clear abort timers.
 - Monorepo release tags (`expo-router@58.0.29`) only appear in Changelogs for packages the user depends on, unless the repo is watched.
 
+## Code style
+
+### Code
+
+- **TypeScript strict** (`noUncheckedIndexedAccess`, `verbatimModuleSyntax`). Use `import type` for types. Path alias `@/` → `src/`.
+- **Formatting is oxfmt's job** (120 columns, double quotes). Don't hand-format; run `pnpm fmt`.
+- **Comments**: one line, two at most, only for the non-obvious _why_. Never restate what the code says. No banner or block comments.
+- **Naming**: say what it is. `computeOutdated`, `parseStatus`, `formatSpec`. No `utils.ts` dumping grounds; put helpers next to their only caller or in a named module.
+- **Functions over classes**, except for typed errors (`RegistryError`, `GitError`).
+- **Pure first**: parsing, planning and formatting are pure functions with tests; I/O happens at the edges through `Io`.
+- **Errors**: throw `Error` subclasses with a message a user can act on ("The working tree has uncommitted changes. Commit or stash them first."). Anything the user started surfaces its error in the UI. Only background work they didn't ask for (update check, `git fetch` before counting commits) may fail quietly, and it then behaves as "nothing new".
+- **No dead flexibility**: no options nobody passes, no abstractions for one caller. Interfaces exist only where we already have or plan multiple implementations (sync, deploy, AI providers, `Io`).
+- **Performance from the start**: dedupe in-flight requests, cache with ETags, skip work whose inputs' SHA-256 fingerprint is unchanged, read snapshots in bulk, coalesce query invalidations (`svc.invalidate`), limit concurrency, virtualize long lists, avoid re-parsing big files in render.
+- **Dependencies**: pinned exact (`saveExact`), latest stable, respecting `minimumReleaseAge`. Prefer the platform (WebCrypto, `fetch`, `structuredClone`) before adding a package.
+
+### React
+
+- **React Compiler is on.** Don't write `useMemo`, `useCallback` or `memo` by hand. If the compiler bails out, fix the code (it usually means a rule-of-React violation).
+- Data comes from TanStack Query hooks (`src/app/queries.ts`) over functions in `src/services`; components don't call `fetch` or `invoke` directly.
+- External stores (`useSyncExternalStore`) return immutable snapshots; never mutate an object a component already rendered.
+- Keep components small: when a component branches a lot, split it into named subcomponents. Derive flags in a plain function outside the component. Shared feature pieces live in `src/modules`, screen-only ones stay in the route file; non-component helpers go in `src/services` or `src/engine`, not in `.tsx` files.
+- Wrap panels, table rows and chrome in `ErrorBoundary` (`src/ui/error-boundary.tsx`) so one bad snapshot can't blank a screen.
+- State a user would expect to come back to (tabs, filters, selected item) lives in the URL search params, not `useState`.
+- Effects only for syncing with external systems (subscriptions, IPC channels). Derive everything else during render.
+- Accessibility: every interactive element is reachable by keyboard, has a visible focus ring, and an accessible name.
+
+### Rust
+
+- `cargo fmt` + `clippy -D warnings` clean. Commands return `Result<T, String>` with messages fit for the UI.
+- Never shell out through a shell; pass argv arrays. Resolve programs with `which` so Windows `.cmd` shims work.
+
 ## Testing conventions
 
+- Vitest. Name tests by behaviour (`"keeps devDependencies in devDependencies"`); fixtures look like real files (real lockfile shapes, trimmed registry documents).
 - A test that reproduces a known bug nobody fixes yet is `it.fails`, with a comment saying what's wrong; it turns red once the bug is gone, and then becomes a plain `it`. In Rust the same pin is `#[should_panic(expected = "...")]`.
 - CI only runs on Windows, so `#[cfg(not(windows))]` and `#[cfg(unix)]` Rust isn't compiled there. After changing such code, compile it some other way before pushing: this broke the macOS release once.
 - **Bugs are test-first.** When a bug is reported or found, first write a test that reproduces it and watch it fail, then fix the code until it passes. The test stays as the regression test.
@@ -128,7 +160,7 @@ Rules:
 
 ## Status
 
-Every feature from the plan is implemented and `pnpm check` is green (~170 TS tests, Rust tests, clippy clean).
+Released as 1.x. `pnpm check` is green (TS tests, Rust tests, clippy clean). UI rules and tokens: [STYLE.md](STYLE.md).
 
 Done:
 
@@ -137,18 +169,23 @@ Done:
 - Design system: dark and light themes on the same token names (`src/styles/app.css`), the inset canvas shell, `StatusGlyph` for project state, motion tokens; spec in the Tidra design system artifact
 - Dependency search lives in the palette (Ctrl+K by default, set in Settings): type a package to see where it is used and update it everywhere
 - Push and open a PR from Tidra (`BranchActions`); merging stays on GitHub, the app never merges
-- Updates always run on the current branch; the user decides each time where the work goes. Commit & Push commits there, and its menu's "Commit to new branch…" moves the work to a named branch (`tidra/deps-<date>` by default), commits and pushes it. Open PR shows only off the default branch, once no pull request exists. Revert restores every tracked file the update changed (`git diff HEAD`), including files the package manager rewrote on its own, such as `pnpm-workspace.yaml`. They never commit, push or open a PR on their own: they stop after the checks. "Commit & Push" (menu: Commit, Push) commits everything with the latest uncommitted run's message (`commitProject`), and "Run checks" reruns the project's checks in an output dialog (update dialog and project page)
+- Updates always run on the current branch; the user decides each time where the work goes. Commit & Push commits there, and its menu's "Commit to new branch…" moves the work to a named branch (`tidra/deps-<date>` by default), commits and pushes it. Open PR shows only off the default branch, once it has commits the base doesn't and no pull request exists. Push shows when commits only go out; Sync (with the incoming count) when something comes in, and pushes on the way. The branch picker offers a new auto-named branch (`freshBranchName`). Updates run beside other uncommitted work: files already edited stay out of the update's commit (`otherWork`), and Revert puts package files edited before the update back as they were (`restore`), not as HEAD has them. Revert restores every tracked file the update changed (`git diff HEAD`), including files the package manager rewrote on its own, such as `pnpm-workspace.yaml`. They never commit, push or open a PR on their own: they stop after the checks. "Commit & Push" (menu: Commit, Push) commits everything with the latest uncommitted run's message (`commitProject`), and "Run checks" reruns the project's checks in an output dialog (update dialog and project page)
 - Actions updates commit on a `tidra/actions-<date>` branch cut from the default branch (never the current branch); each repo with outdated actions can copy a prompt for a coding agent (`actionsUpdatePrompt`)
 - Security overrides don't commit either: they record a run whose message Commit uses (`fixWithOverride`)
 - PR bodies list each package with its versions (`pullBody`), taken from the commit bodies
 - Commit subjects and PR titles for several packages name them riskiest first and count the rest (`bumpSubject`): `chore(deps): bump next, oxfmt and 9 more`. PR titles someone wrote by hand are kept
 - Sync (`syncRepo`, `SyncButton`): fetch origin and upstream (never `--all`, a contributor's deleted fork would fail it), fast-forward a fork's default branch to `upstream`, take origin's commits with a local `merge --ff-only` (a `git pull` would connect a second time), push, update an open PR's description; never merges or rebases on its own
-- Git page: clicking a repo opens its branches (`BranchesDialog`) with a merged icon (squash merges included), delete per branch and Delete all. Unmerged branches and Delete all confirm first. The current and default branch can't be deleted, and copies on a remote stay
+- Repos page: a repo's row menu opens its branches (`BranchesDialog`) with a merged icon (squash merges included), delete per branch and Delete all. Unmerged branches and Delete all confirm first. The current and default branch can't be deleted, and copies on a remote stay
+- Closing an output dialog (update, script, upgrade) while it runs leaves a chip in the header that brings it back (`dismissedWork`, `DismissedWorkChips`)
+- Report an issue (Ctrl+Shift+B, the palette, Settings): files a bug, regression or feature on this repo with the user's GitHub CLI (`src/services/issues.ts`); pasted screenshots are uploaded with `gh issue create --attach` (gh 2.103+; the dialog asks older versions to update, and the issue then opens on GitHub to add them). The body is a checked Type list, the description, then the version, OS, behaviour-changing settings and the session's recent errors the user left checked (errors may hold private data, so each can be unchecked). Read new work from those issues with `gh issue list -R yusifaliyevpro/tidra-app`
+- A version younger than `minimumReleaseAge` but offered because the package is in `minimumReleaseAgeExclude` shows a clock with the reason (`newerThanReleaseAge`)
+- The project glyph shows update state only; advisories are their own column and screen
+- Popovers stay inside the window (shift, then flip above the trigger)
 - Scripts runs any project's scripts; starting one from a project page or Toolchain opens its live output in a dialog there
 - The sidebar resumes each section where it was left (the project tab is in the URL); clicking the current section again goes to its root
 - Native feel pass, flash fixes, copy pass
 - CI and release workflows, updater signing via `.env.local`
-- v0.1.0 released through `release.yml` with signed installers for Windows, macOS and Linux
+- Releases (1.0.0 onward) go through `release.yml` with signed installers for Windows, macOS and Linux
 - Signed installer used day to day: update → checks → commit, push and PR verified on real repos
 - README screenshot
 - Background update check at launch and every 6 h (`src/app/app-update.tsx`); failures stay silent, a found update shows "Update to x.y.z" beside the search box

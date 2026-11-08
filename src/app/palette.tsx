@@ -1,13 +1,15 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Command } from "cmdk";
-import { ArrowLeft, ArrowUpCircle, FolderGit2, Package, Pause, Play, RefreshCw } from "lucide-react";
+import { ArrowLeft, ArrowUpCircle, Bug, FolderGit2, Package, Pause, Play, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import semver from "semver";
 import type { ProjectWithPath } from "@/core/store";
 import { projectLink } from "@/modules/links";
+import { issueDraft } from "@/services/issue-draft";
 import { refreshProject, type ProjectReport } from "@/services/projects";
 import { startBatch } from "@/services/updates";
+import { useBackdropClose } from "@/ui/backdrop";
 import { toast, toastError } from "@/ui/toast";
 import { MODULES } from "./modules";
 import { useReports } from "./queries";
@@ -73,18 +75,14 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
     if (open && el && !el.open) el.showModal();
     if (!open && el?.open) el.close();
   }, [open]);
+  useBackdropClose(dialog, onClose);
 
   return (
-    // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions -- Esc already closes it; this adds backdrop clicks
     <dialog
       ref={dialog}
       aria-label="Command palette"
       onClose={onClose}
       onCancel={onClose}
-      // A click on the backdrop lands on the <dialog> itself; clicks inside land on its content.
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
       className="mx-auto mt-[12vh] w-[640px] max-w-[92vw] animate-dialog-in rounded-xl border border-line-strong bg-raised p-0 text-fg shadow-dialog backdrop:bg-scrim"
     >
       {open ? <PaletteBody onClose={onClose} /> : null}
@@ -223,6 +221,14 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
                 onSelect={() => run(() => svc.scheduler.setPaused(!paused))}
               >
                 {paused ? "Resume background checks" : "Pause background checks"}
+              </Item>
+              <Item
+                value="report an issue bug feature request"
+                icon={<Bug />}
+                hint="Ctrl Shift B"
+                onSelect={() => run(issueDraft.open)}
+              >
+                Report an issue
               </Item>
             </Command.Group>
           </>

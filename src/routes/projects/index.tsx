@@ -2,13 +2,14 @@ import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import * as z from "@zod/mini";
 import { cn } from "cn";
-import { ArrowDown, ArrowUp, ChevronDown, Pencil, Plus, Search, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, Clock, Pencil, Plus, Search, X } from "lucide-react";
 import { Fragment, useEffect, useRef, useState, type MouseEvent, type RefObject } from "react";
 import { useFreshGit, useHome, useJobs, useReports, useSetting } from "@/app/queries";
 import { useServices } from "@/app/services";
 import { useListKeys } from "@/app/shortcuts";
 import { repoLabel } from "@/engine/discover";
 import type { GitStatus } from "@/engine/git";
+import { releaseAgeNote } from "@/engine/outdated";
 import { JobRefresh } from "@/modules/common";
 import { projectLink } from "@/modules/links";
 import { AddProjectsDialog } from "@/modules/projects/add-project";
@@ -723,6 +724,11 @@ function Peek({ row, health, onClose }: { row: Row; health: ProjectHealth | unde
           outdated.map((entry) => (
             <div key={`${entry.name}:${entry.range}`} className="flex h-9 items-center gap-2 border-b border-line px-4">
               <Mono className="min-w-0 flex-1 truncate text-fg">{entry.name}</Mono>
+              {entry.newerThanReleaseAge ? (
+                <span title={releaseAgeNote(entry.newerThanReleaseAge)} className="flex">
+                  <Clock className="size-3.5 text-warn" aria-label={releaseAgeNote(entry.newerThanReleaseAge)} />
+                </span>
+              ) : null}
               <Mono className="text-faint">{entry.current ?? entry.range}</Mono>
               <span className="text-faint">→</span>
               <Mono className={BUMP_TEXT[entry.bump]}>{entry.latest}</Mono>
@@ -750,6 +756,7 @@ function Peek({ row, health, onClose }: { row: Row; health: ProjectHealth | unde
         runId={runId}
         projectId={row.project.id}
         path={row.project.path}
+        name={row.project.name}
         onClose={() => setRunId(undefined)}
       />
     </aside>
