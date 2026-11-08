@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Services } from "@/services/context";
 import { readReport, refreshProject } from "@/services/projects";
@@ -55,7 +56,8 @@ describe("branches and sync on real repositories", { timeout: 30_000 }, () => {
     git(seed, "push", "--quiet", join(base, "fork.git"), "main", "shared");
     git(base, "clone", "--quiet", "fork.git", "forked");
     const work = join(base, "forked");
-    git(work, "remote", "add", "upstream", join(base, "origin.git"));
+    // A file:// URL: a bare POSIX path isn't a URL, so fork detection misses it off Windows.
+    git(work, "remote", "add", "upstream", pathToFileURL(join(base, "origin.git")).href);
     git(work, "fetch", "--quiet", "upstream");
     return { seed, work };
   }
