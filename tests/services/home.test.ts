@@ -3,7 +3,7 @@ import { dismissals } from "@/core/db/schema";
 import type { Finding } from "@/engine/advisories";
 import type { WorkflowRun } from "@/integrations/github";
 import type { CiSnapshot } from "@/services/github-feed";
-import { homeSummary, needsAttention, type HomeSummary } from "@/services/home";
+import { homeSummary } from "@/services/home";
 import { reportKey } from "@/services/projects";
 import { securityKey } from "@/services/security";
 import { writeSnapshot } from "@/services/snapshot";
@@ -60,7 +60,6 @@ describe("homeSummary", () => {
     const summary = await homeSummary(svc);
     close();
     expect(summary).toMatchObject({ projects: 0, updates: { major: 0, minor: 0, patch: 0, projects: 0 }, health: [] });
-    expect(needsAttention(summary)).toBe(false);
   });
 
   it("totals updates per bump and counts projects that have any", async () => {
@@ -97,7 +96,6 @@ describe("homeSummary", () => {
       total: 2,
       failingAudit: 1,
     });
-    expect(needsAttention(summary)).toBe(true);
   });
 
   it("orders projects by how much needs attention", async () => {
@@ -158,39 +156,6 @@ describe("homeSummary", () => {
     const summary = await homeSummary(svc);
     close();
     expect(summary.deploys.failing).toEqual([]);
-  });
-});
-
-describe("needsAttention", () => {
-  const calm: HomeSummary["security"] = {
-    bySeverity: { critical: 0, high: 0, moderate: 0, low: 0 },
-    total: 0,
-    failingAudit: 0,
-  };
-  const summary = (extra: Partial<HomeSummary>): HomeSummary => ({
-    projects: 0,
-    updates: { major: 0, minor: 0, patch: 0, projects: 0 },
-    security: calm,
-    ci: { failing: [], repos: [] },
-    reviewRequests: 0,
-    myPulls: 0,
-    myPullsFailing: 0,
-    botPulls: 0,
-    deploys: { failing: [] },
-    actions: { outdated: 0, repos: 0 },
-    git: { dirty: 0, unpushed: 0, behind: 0 },
-    health: [],
-    releases: [],
-    ...extra,
-  });
-
-  it("is set by review requests, failing CI or deploys, and audits", () => {
-    expect(needsAttention(summary({}))).toBe(false);
-    expect(needsAttention(summary({ reviewRequests: 1 }))).toBe(true);
-    expect(needsAttention(summary({ deploys: { failing: [{ project: "x", provider: "vercel" }] } }))).toBe(true);
-    expect(
-      needsAttention(summary({ ci: { failing: [{ name: "a", repo: "o/a", url: "u", title: "t" }], repos: [] } })),
-    ).toBe(true);
   });
 });
 

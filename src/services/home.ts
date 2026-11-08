@@ -207,10 +207,3 @@ export async function homeSummary(svc: Services): Promise<HomeSummary> {
     releases: (timeline?.data.items ?? []).slice(0, 8),
   };
 }
-
-/** Something on Home is red: drives the tray badge. */
-export const needsAttention = (summary: HomeSummary) =>
-  summary.security.failingAudit > 0 ||
-  summary.ci.failing.length > 0 ||
-  summary.deploys.failing.length > 0 ||
-  summary.reviewRequests > 0;

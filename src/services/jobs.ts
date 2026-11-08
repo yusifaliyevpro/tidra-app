@@ -1,7 +1,6 @@
 import * as z from "@zod/mini";
 import { like } from "drizzle-orm";
 import { notifications } from "@/core/db/schema";
-import { setTrayAttention } from "@/core/native";
 import type { Job } from "@/core/scheduler";
 import { runFailed } from "@/integrations/github";
 import { scanAllActions } from "./actions";
@@ -9,8 +8,8 @@ import { buildTimeline } from "./changelogs";
 import type { Services } from "./context";
 import { refreshDeploys } from "./deploys";
 import { refreshBotPulls, refreshCi, refreshInbox } from "./github-feed";
-import { dismissedAdvisories, homeSummary, needsAttention } from "./home";
-import { notify } from "./notify";
+import { dismissedAdvisories } from "./home";
+import { notify, updateTray } from "./notify";
 import { refreshPackages } from "./packages";
 import { readAllReports, refreshAllProjects } from "./projects";
 import { readAllSecurity, scanAllProjects } from "./security";
@@ -181,13 +180,6 @@ export const JOBS: JobDefinition[] = [
 const IntervalsSchema = z.record(z.string(), z.number());
 export const readJobIntervals = (svc: Services) => svc.store.getSetting(JOB_INTERVALS_SETTING, IntervalsSchema, {});
 
-async function updateTray(svc: Services) {
-  if (svc.preview) return;
-  const summary = await homeSummary(svc);
-  await setTrayAttention(needsAttention(summary), svc.scheduler.isPaused()).catch(() => undefined);
-  await svc.queryClient.invalidateQueries({ queryKey: ["home"] });
-}
-
 const LAST_RUNS = "jobLastRuns";
 const LastRunsSchema = z.record(z.string(), z.number());
 
@@ -226,6 +218,7 @@ export async function registerJobs(svc: Services): Promise<void> {
         runs.set(definition.id, Date.now());
         await svc.store.setLocal(LAST_RUNS, Object.fromEntries(runs));
         await updateTray(svc);
+        await svc.queryClient.invalidateQueries({ queryKey: ["home"] });
         svc.invalidate(["github-rate-limit"]);
       },
     };
