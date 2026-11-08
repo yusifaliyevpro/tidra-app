@@ -3,6 +3,9 @@ import babel from "@rolldown/plugin-babel";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
+// Some CI shells set this to "", and @ai-sdk/anthropic then throws on import.
+delete process.env.ANTHROPIC_BASE_URL;
+
 export default defineConfig({
   plugins: [react(), babel({ presets: [reactCompilerPreset()] })],
   resolve: {
