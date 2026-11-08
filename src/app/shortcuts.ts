@@ -7,8 +7,8 @@ const isTyping = (target: EventTarget | null) =>
   target instanceof HTMLElement &&
   (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
-/** The palette shortcut (Ctrl+P by default) opens the palette; `g` then a module key navigates, like Linear. */
-export function useGlobalShortcuts(openPalette: () => void, paletteShortcut: string) {
+/** The palette shortcut (Ctrl+K by default) opens the palette, Ctrl+B folds the sidebar; `g` then a module key navigates. */
+export function useGlobalShortcuts(openPalette: () => void, paletteShortcut: string, toggleSidebar?: () => void) {
   const navigate = useNavigate();
   useEffect(() => {
     let pendingG = 0;
@@ -16,6 +16,11 @@ export function useGlobalShortcuts(openPalette: () => void, paletteShortcut: str
       if (matchesAccelerator(event, paletteShortcut)) {
         event.preventDefault();
         openPalette();
+        return;
+      }
+      if (toggleSidebar && (event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        toggleSidebar();
         return;
       }
       if (event.ctrlKey || event.metaKey || event.altKey || isTyping(event.target)) return;
@@ -32,7 +37,7 @@ export function useGlobalShortcuts(openPalette: () => void, paletteShortcut: str
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navigate, openPalette, paletteShortcut]);
+  }, [navigate, openPalette, paletteShortcut, toggleSidebar]);
 }
 
 /** j/k/Enter navigation for a list of ids; the caller decides what selecting and opening mean. */

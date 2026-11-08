@@ -120,6 +120,16 @@ export function createScheduler(options: SchedulerOptions = {}) {
       if (!paused) tick();
     },
     isPaused: () => paused,
+    /** Applies a new interval at once: the next run moves to the last run plus the new interval. */
+    setInterval(id: string, minutes: number) {
+      const job = jobs.get(id);
+      const state = states.get(id);
+      if (!job || !state) return;
+      job.intervalMinutes = minutes;
+      if (!state.running) state.nextRun = state.lastRun === undefined ? now() : state.lastRun + minutes * 60_000;
+      emit();
+      tick();
+    },
     async runNow(id: string) {
       const job = jobs.get(id);
       if (job) await execute(job);

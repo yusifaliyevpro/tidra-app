@@ -27,7 +27,7 @@ export function BranchMenu({ projectId, git }: { projectId: string; git: GitStat
             event.stopPropagation();
             toggle(event);
           }}
-          className="flex h-6 max-w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-sm text-muted transition-colors hover:bg-white/[0.06] hover:text-fg aria-expanded:bg-white/[0.06] aria-expanded:text-fg"
+          className="flex h-6 max-w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-sm text-muted transition-colors hover:bg-hover hover:text-fg aria-expanded:bg-selected aria-expanded:text-fg"
         >
           <GitBranch className="size-3.5 shrink-0" />
           <span className="truncate font-mono text-xs">{git.branch ?? "detached"}</span>
@@ -109,7 +109,7 @@ function BranchList({
             onSelect={() => pick(branch.name)}
           >
             {branch.name === current ? (
-              <Check className="size-3.5 shrink-0 text-accent" />
+              <Check className="size-3.5 shrink-0 text-accent-text" />
             ) : branch.remote ? (
               <Cloud className="size-3.5 shrink-0 text-faint" />
             ) : (

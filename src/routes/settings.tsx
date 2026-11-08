@@ -12,6 +12,7 @@ import {
   Database,
   GitPullRequest,
   Monitor,
+  Paintbrush,
   RefreshCw,
   Rocket,
   ShieldCheck,
@@ -30,6 +31,7 @@ import {
 } from "@/app/desktop";
 import { useJobs, useSetting } from "@/app/queries";
 import { useServices } from "@/app/services";
+import { THEME_SETTING, THEMES, type ThemeChoice } from "@/app/theme";
 import { inTauri } from "@/core/native";
 import { SEVERITIES, type Severity } from "@/engine/advisories";
 import { AI_PROVIDERS, DEFAULT_AI_CONFIG } from "@/integrations/ai";
@@ -46,13 +48,15 @@ import { JOB_INTERVALS_SETTING, JOBS, readJobIntervals } from "@/services/jobs";
 import { NOTIFICATION_KINDS, NOTIFY_SETTING, readNotifyPrefs } from "@/services/notify";
 import { Button } from "@/ui/button";
 import { Input, Select, Switch } from "@/ui/field";
-import { ErrorNote } from "@/ui/layout";
+import { ErrorNote, Page } from "@/ui/layout";
 import { ExternalLink } from "@/ui/markdown";
+import { Segmented } from "@/ui/misc";
 import { TimeAgo } from "@/ui/time";
 import { toast, toastError } from "@/ui/toast";
 
 const SECTIONS = [
   { id: "general", label: "General", icon: Monitor },
+  { id: "appearance", label: "Appearance", icon: Paintbrush },
   { id: "github", label: "GitHub", icon: GitPullRequest },
   { id: "sync", label: "Sync", icon: Cloud },
   { id: "deploys", label: "Deploys", icon: Rocket },
@@ -72,6 +76,7 @@ export const Route = createFileRoute("/settings")({
 
 const PANES: Record<SectionId, () => ReactNode> = {
   general: GeneralPane,
+  appearance: AppearancePane,
   github: () => (
     <SettingsGroup>
       <GitHubSettings />
@@ -101,9 +106,8 @@ function Settings() {
   const Pane = PANES[current.id];
 
   return (
-    <div className="flex h-full">
-      <nav className="flex w-56 shrink-0 flex-col gap-0.5 border-r border-line p-2">
-        <h1 className="px-2.5 pt-2 pb-3 text-lg font-medium">Settings</h1>
+    <Page title="Settings" className="flex overflow-hidden">
+      <nav className="flex w-56 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-line p-2">
         {SECTIONS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -111,11 +115,11 @@ function Settings() {
             aria-current={id === current.id || undefined}
             onClick={() => void navigate({ to: "/settings", search: { section: id }, replace: true })}
             className={cn(
-              "flex h-8 items-center gap-2.5 rounded-md px-2.5 text-left text-muted hover:bg-hover hover:text-fg",
-              id === current.id && "bg-raised text-fg",
+              "flex h-7 items-center gap-2.5 rounded-md px-2.5 text-left text-muted hover:bg-hover hover:text-fg",
+              id === current.id && "bg-selected text-fg",
             )}
           >
-            <Icon className="size-4" />
+            <Icon className="size-4" strokeWidth={1.5} />
             {label}
           </button>
         ))}
@@ -126,7 +130,7 @@ function Settings() {
           <Pane />
         </div>
       </div>
-    </div>
+    </Page>
   );
 }
 
@@ -135,7 +139,6 @@ function GeneralPane() {
   const queryClient = useQueryClient();
   const { data: hotkey } = useSetting(HOTKEY_SETTING, z.string(), DEFAULT_HOTKEY);
   const { data: paletteKey } = useSetting(PALETTE_SHORTCUT_SETTING, z.string(), DEFAULT_PALETTE_SHORTCUT);
-  const { data: accent } = useSetting(ACCENT_SETTING, z.string(), DEFAULT_ACCENT);
   const autostart = useQuery({ queryKey: ["autostart"], queryFn: () => isEnabled(), enabled: inTauri });
   const version = useQuery({ queryKey: ["version"], queryFn: () => getVersion(), enabled: inTauri });
   const [hotkeyError, setHotkeyError] = useState<string>();
@@ -151,13 +154,6 @@ function GeneralPane() {
     mutationFn: async (value: string) => {
       await svc.store.setSetting(PALETTE_SHORTCUT_SETTING, value || DEFAULT_PALETTE_SHORTCUT);
       await queryClient.invalidateQueries({ queryKey: ["setting", PALETTE_SHORTCUT_SETTING] });
-    },
-  });
-  const saveAccent = useMutation({
-    mutationFn: async (value: string) => {
-      await svc.store.setSetting(ACCENT_SETTING, value);
-      await applyAppearance(svc);
-      await queryClient.invalidateQueries({ queryKey: ["setting", ACCENT_SETTING] });
     },
   });
   const toggleAutostart = useMutation({
@@ -181,7 +177,7 @@ function GeneralPane() {
     <>
       {inTauri ? (
         <SettingsGroup>
-          <SettingRow label="Start with Windows" description="Opens in the tray">
+          <SettingRow label="Start with Windows">
             <Switch
               label="Start with Windows"
               checked={autostart.data ?? false}
@@ -196,7 +192,7 @@ function GeneralPane() {
         </SettingsGroup>
       ) : null}
       <SettingsGroup title="Shortcuts">
-        <SettingRow label="Show or hide Tidra" description="Backspace turns it off">
+        <SettingRow label="Show or hide Tidra">
           {(id) => <ShortcutInput id={id} value={hotkey ?? ""} onChange={(value) => saveHotkey.mutate(value)} />}
         </SettingRow>
         <SettingRow label="Command palette">
@@ -206,27 +202,85 @@ function GeneralPane() {
         </SettingRow>
       </SettingsGroup>
       {hotkeyError ? <ErrorNote>Another app uses this shortcut: {hotkeyError}</ErrorNote> : null}
-      <SettingsGroup title="Appearance">
-        <SettingRow label="Accent color">
-          {(id) => (
-            <>
-              {accent && accent !== DEFAULT_ACCENT ? (
-                <Button size="sm" variant="ghost" onClick={() => saveAccent.mutate(DEFAULT_ACCENT)}>
-                  Reset
-                </Button>
-              ) : null}
-              <input
-                id={id}
-                type="color"
-                value={accent ?? DEFAULT_ACCENT}
-                onChange={(e) => saveAccent.mutate(e.target.value)}
-                className="h-7 w-10 rounded-md border border-line-strong bg-surface"
-              />
-            </>
-          )}
-        </SettingRow>
-      </SettingsGroup>
     </>
+  );
+}
+
+const ACCENTS = [
+  { label: "Tide", value: DEFAULT_ACCENT },
+  { label: "Violet", value: "#7457e0" },
+  { label: "Teal", value: "#14857a" },
+  { label: "Green", value: "#2f8a4c" },
+  { label: "Amber", value: "#b8650f" },
+  { label: "Rose", value: "#c43d6b" },
+];
+
+function AppearancePane() {
+  const svc = useServices();
+  const queryClient = useQueryClient();
+  const { data: theme = "system" } = useSetting(THEME_SETTING, z.enum(THEMES), "system");
+  const { data: accent = DEFAULT_ACCENT } = useSetting(ACCENT_SETTING, z.string(), DEFAULT_ACCENT);
+  const save = useMutation({
+    mutationFn: async ({ key, value }: { key: string; value: string }) => {
+      await svc.store.setSetting(key, value);
+      await applyAppearance(svc);
+      await queryClient.invalidateQueries({ queryKey: ["setting", key] });
+    },
+    onError: toastError,
+  });
+  const preset = ACCENTS.some((a) => a.value === accent);
+  return (
+    <SettingsGroup>
+      <SettingRow label="Theme">
+        <Segmented<ThemeChoice>
+          label="Theme"
+          value={theme}
+          onChange={(value) => save.mutate({ key: THEME_SETTING, value })}
+          options={[
+            { id: "system", label: "System" },
+            { id: "dark", label: "Dark" },
+            { id: "light", label: "Light" },
+          ]}
+        />
+      </SettingRow>
+      <SettingRow label="Accent color">
+        <fieldset aria-label="Accent color" className="flex items-center gap-1.5">
+          {ACCENTS.map((a) => (
+            <button
+              key={a.value}
+              type="button"
+              aria-pressed={accent === a.value}
+              aria-label={a.label}
+              title={a.label}
+              onClick={() => save.mutate({ key: ACCENT_SETTING, value: a.value })}
+              className={cn(
+                "size-5 rounded-full ring-offset-2 ring-offset-surface transition-shadow",
+                accent === a.value && "ring-2 ring-fg",
+              )}
+              style={{ background: a.value }}
+            />
+          ))}
+          <label
+            title="Custom color"
+            className={cn(
+              "relative size-5 overflow-hidden rounded-full border border-line-strong ring-offset-2 ring-offset-surface",
+              !preset && "ring-2 ring-fg",
+            )}
+            style={{
+              background: preset ? "conic-gradient(#f26b67, #e8ad42, #4cc38a, #71a9ff, #7457e0, #f26b67)" : accent,
+            }}
+          >
+            <span className="sr-only">Custom color</span>
+            <input
+              type="color"
+              value={accent}
+              onChange={(e) => save.mutate({ key: ACCENT_SETTING, value: e.target.value })}
+              className="absolute inset-0 opacity-0"
+            />
+          </label>
+        </fieldset>
+      </SettingRow>
+    </SettingsGroup>
   );
 }
 
@@ -351,7 +405,7 @@ function SecurityPane() {
           </Select>
         )}
       </SettingRow>
-      <SettingRow label="Production dependencies only" description="Like --prod">
+      <SettingRow label="Production dependencies only">
         <Switch
           label="Production dependencies only"
           checked={threshold.prodOnly}
@@ -374,9 +428,9 @@ function ChecksPane() {
   const save = useMutation({
     mutationFn: async (next: Record<string, number>) => {
       await svc.store.setSetting(JOB_INTERVALS_SETTING, next);
+      for (const [id, minutes] of Object.entries(next)) svc.scheduler.setInterval(id, minutes);
       await queryClient.invalidateQueries({ queryKey: ["setting", JOB_INTERVALS_SETTING] });
     },
-    onSuccess: () => toast("Applies after restart."),
   });
   return (
     <>

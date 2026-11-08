@@ -119,13 +119,11 @@ export function commitMessage(selections: Selection[]): string {
 }
 
 /** Stops after the checks: committing is always the user's click. */
-export const UPDATE_STEPS = ["preflight", "branch", "write", "install", "checks"] as const;
+export const UPDATE_STEPS = ["preflight", "write", "install", "checks"] as const;
 export type UpdateStep = (typeof UPDATE_STEPS)[number];
 export type StepState = "running" | "done" | "skipped" | "failed";
 
 export interface UpdateOptions {
-  /** Create and switch to this branch first; `undefined` updates the current branch. */
-  branch?: string;
   checks: Check[];
   onStep?: (step: UpdateStep, state: StepState, detail?: string) => void;
   onOutput?: (chunk: string, stream: OutputStream) => void;
@@ -196,13 +194,6 @@ export async function runUpdate(
     if (!isClean(status)) throw new Error("The working tree has uncommitted changes. Commit or stash them first.");
     done();
 
-    if (options.branch) {
-      begin("branch", options.branch);
-      await git.switchCreate(options.branch);
-      result.createdBranch = options.branch;
-      done();
-    } else skip("branch");
-
     result.touched = changes.map((c) => relative(workspace.root, c.path));
     if (catalogChanges.length > 0) {
       begin("write");
@@ -222,6 +213,14 @@ export async function runUpdate(
           if (!result.touched.includes(path) && (await io.exists(join(workspace.root, path))))
             result.touched.push(path);
         }
+      }
+      // The package manager may rewrite more than Tidra planned (pnpm prunes minimumReleaseAgeExclude in
+      // pnpm-workspace.yaml); the tree was clean before, so every tracked change belongs to this update.
+      const known = new Set(result.touched);
+      for (const path of await git.changedPaths().catch((): string[] => [])) {
+        if (known.has(path)) continue;
+        known.add(path);
+        result.touched.push(path);
       }
     }
     done();

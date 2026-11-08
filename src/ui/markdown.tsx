@@ -27,7 +27,7 @@ export function ExternalLink({ href, children, className }: { href: string; chil
   return (
     <a
       href={href}
-      className={className ?? "text-accent hover:underline"}
+      className={className ?? "text-accent-text hover:underline"}
       onClick={(e) => {
         e.preventDefault();
         openExternal(href);

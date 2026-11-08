@@ -119,7 +119,7 @@ async function refreshCiAndNotify(svc: Services) {
         key: `${entry.repo}:${run.id}`,
         title: `${entry.name}: CI failed`,
         body: `${run.display_title ?? run.name ?? "Workflow"} on ${run.head_branch ?? "unknown branch"}`,
-        route: "/ci",
+        route: "/repos",
       }),
     ),
   );

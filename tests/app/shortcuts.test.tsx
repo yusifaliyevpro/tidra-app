@@ -8,8 +8,8 @@ import { useGlobalShortcuts } from "@/app/shortcuts";
 const navigate = vi.hoisted(() => vi.fn<(options: { to: string }) => Promise<void>>());
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate }));
 
-function Shell({ onPalette }: { onPalette: () => void }) {
-  useGlobalShortcuts(onPalette, DEFAULT_PALETTE_SHORTCUT);
+function Shell({ onPalette, onSidebar }: { onPalette: () => void; onSidebar?: () => void }) {
+  useGlobalShortcuts(onPalette, DEFAULT_PALETTE_SHORTCUT, onSidebar);
   return <input aria-label="Search" />;
 }
 
@@ -22,8 +22,15 @@ describe("useGlobalShortcuts", () => {
     const onPalette = vi.fn<() => void>();
     render(<Shell onPalette={onPalette} />);
     await userEvent.click(screen.getByRole("textbox", { name: "Search" }));
-    await userEvent.keyboard("{Control>}p{/Control}");
+    await userEvent.keyboard("{Control>}k{/Control}");
     expect(onPalette).toHaveBeenCalledOnce();
+  });
+
+  it("folds the sidebar with Ctrl+B", async () => {
+    const onSidebar = vi.fn<() => void>();
+    render(<Shell onPalette={() => {}} onSidebar={onSidebar} />);
+    await userEvent.keyboard("{Control>}b{/Control}");
+    expect(onSidebar).toHaveBeenCalledOnce();
   });
 
   it("goes to a screen with g and its key", async () => {

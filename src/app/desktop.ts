@@ -4,15 +4,17 @@ import { register, unregisterAll } from "@tauri-apps/plugin-global-shortcut";
 import * as z from "@zod/mini";
 import { inTauri, setTrayAttention } from "@/core/native";
 import type { Services } from "@/services/context";
+import { applyTheme, THEME_SETTING, THEMES } from "./theme";
 
 export const HOTKEY_SETTING = "hotkey";
 export const ACCENT_SETTING = "accent";
 export const DEFAULT_HOTKEY = "CommandOrControl+Shift+Space";
-export const DEFAULT_ACCENT = "#3a74d8";
+export const DEFAULT_ACCENT = "#4565e8";
 
 export async function applyAppearance(svc: Services) {
   const accent = await svc.store.getSetting(ACCENT_SETTING, z.string(), DEFAULT_ACCENT);
   document.documentElement.style.setProperty("--accent", accent);
+  applyTheme(await svc.store.getSetting(THEME_SETTING, z.enum(THEMES), "system"));
 }
 
 async function toggleWindow() {

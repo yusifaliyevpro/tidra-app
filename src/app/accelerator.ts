@@ -65,9 +65,9 @@ export const acceleratorKeys = (accelerator: string) =>
     .filter(Boolean)
     .map((part) => (part === "CommandOrControl" || part === "CmdOrCtrl" || part === "Control" ? "Ctrl" : part));
 
-/** Opens the command palette; Ctrl+P is free because the webview blocks printing anyway. */
+/** Opens the command palette, as in Linear and VS Code's quick open. */
 export const PALETTE_SHORTCUT_SETTING = "paletteShortcut";
-export const DEFAULT_PALETTE_SHORTCUT = "CommandOrControl+P";
+export const DEFAULT_PALETTE_SHORTCUT = "CommandOrControl+K";
 
 /** True when a key press is exactly this accelerator. */
 export const matchesAccelerator = (

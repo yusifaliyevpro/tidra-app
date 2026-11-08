@@ -30,7 +30,7 @@ function Item({
     <Command.Item
       value={value}
       onSelect={onSelect}
-      className="flex h-9 items-center gap-2.5 rounded-md px-2.5 text-base text-muted data-[selected=true]:bg-white/[0.07] data-[selected=true]:text-fg [&_svg]:size-4 [&_svg]:shrink-0"
+      className="flex h-9 items-center gap-2.5 rounded-md px-2.5 text-base text-muted data-[selected=true]:bg-selected data-[selected=true]:text-fg [&_svg]:size-4 [&_svg]:shrink-0"
     >
       {icon}
       <span className="min-w-0 flex-1 truncate">{children}</span>
@@ -85,7 +85,7 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
-      className="mx-auto mt-[12vh] w-[640px] max-w-[92vw] rounded-xl border border-line-strong bg-surface p-0 text-fg shadow-2xl shadow-black/50 backdrop:bg-black/50"
+      className="mx-auto mt-[12vh] w-[640px] max-w-[92vw] animate-dialog-in rounded-xl border border-line-strong bg-raised p-0 text-fg shadow-dialog backdrop:bg-scrim"
     >
       {open ? <PaletteBody onClose={onClose} /> : null}
     </dialog>
@@ -132,7 +132,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
             type="button"
             aria-label="Back"
             onClick={() => setPkg(undefined)}
-            className="flex items-center gap-1.5 rounded-md bg-white/[0.07] px-2 py-0.5 text-sm text-fg"
+            className="flex items-center gap-1.5 rounded-md bg-selected px-2 py-0.5 text-sm text-fg"
           >
             <ArrowLeft className="size-3.5" />
             {pkg}

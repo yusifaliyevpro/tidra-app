@@ -9,7 +9,7 @@ const FG: Record<number, string> = {
   32: "text-ok",
   33: "text-warn",
   34: "text-info",
-  35: "text-[#c084fc]",
+  35: "text-accent-text",
   36: "text-accent",
   37: "text-fg",
   90: "text-faint",
@@ -17,7 +17,7 @@ const FG: Record<number, string> = {
   92: "text-ok",
   93: "text-warn",
   94: "text-info",
-  95: "text-[#c084fc]",
+  95: "text-accent-text",
   96: "text-accent",
   97: "text-fg",
 };

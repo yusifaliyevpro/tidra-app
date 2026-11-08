@@ -14,7 +14,7 @@ import type { OutdatedEntry } from "@/engine/outdated";
 import { loadWorkspace } from "@/engine/workspace";
 import type { Services } from "./context";
 import { projectChecks, refreshProject } from "./projects";
-import { updateBranchPlan, UPDATE_BRANCH_PREFIX } from "./pull-requests";
+import { UPDATE_BRANCH_PREFIX } from "./pull-requests";
 
 export interface RunProgress {
   runId: string;
@@ -75,9 +75,7 @@ async function launchUpdate(svc: Services, projectId: string, picks: UpdatePick[
   const work = (async () => {
     const workspace = await loadWorkspace(svc.io, path);
     const selections: Selection[] = picks;
-    const plan = await updateBranchPlan(svc, { ...project, path: workspace.root }, branchName());
     const result = await runUpdate(svc.io, workspace, selections, {
-      branch: plan.branch,
       checks: projectChecks(project, workspace),
       onStep: (step, state, detail) => {
         progress.steps[step] = { state, detail };

@@ -11,10 +11,7 @@ export interface Segment {
 export function SegmentBar({ segments, className }: { segments: Segment[]; className?: string }) {
   const total = segments.reduce((sum, s) => sum + s.value, 0);
   return (
-    <div
-      aria-hidden="true"
-      className={cn("flex h-1.5 w-full gap-px overflow-hidden rounded-full bg-white/[0.06]", className)}
-    >
+    <div aria-hidden="true" className={cn("flex h-1 w-full gap-0.5 overflow-hidden rounded-full", className)}>
       {total > 0
         ? segments
             .filter((s) => s.value > 0)
@@ -22,7 +19,7 @@ export function SegmentBar({ segments, className }: { segments: Segment[]; class
               <span
                 key={s.label}
                 title={`${s.value} ${s.label}`}
-                className={cn("h-full first:rounded-l-full last:rounded-r-full", s.color)}
+                className={cn("h-full rounded-full transition-[width] duration-300 ease-out", s.color)}
                 style={{ width: `${(s.value / total) * 100}%` }}
               />
             ))

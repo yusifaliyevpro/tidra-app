@@ -139,20 +139,11 @@ describe("startUpdate", () => {
     expect(progress.result).toMatchObject({ ok: true, message: "chore(deps): bump react 18.3.1 → 19.3.1" });
     expect(progress.steps).toMatchObject({
       preflight: { state: "done" },
-      branch: { state: "skipped" },
       checks: { state: "done" },
     });
     expect(progress.log).toContain("$ npm run check");
     expect(run).toMatchObject({ id: runId, title: "Update react", ok: true });
     expect(io.runs.some((r) => r.args[0] === "switch")).toBe(false);
-  });
-
-  it("creates the update branch when the project asks for one", async () => {
-    const { io, svc, close } = await project();
-    await svc.store.updateProject("p1", { updateOnBranch: true });
-    await finished(await startUpdate(svc, "p1", [react()]));
-    close();
-    expect(io.runs.find((r) => r.args[0] === "switch")?.args.join(" ")).toMatch(/^switch -c tidra\/deps-\d{8}-\d{4}$/);
   });
 
   it("records a failing check as a failed run", async () => {

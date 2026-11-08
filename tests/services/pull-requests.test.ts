@@ -3,43 +3,15 @@ import { runs } from "@/core/db/schema";
 import { SECRET_KEYS } from "@/core/secrets";
 import {
   commitAndPushProject,
+  commitToNewBranch,
   commitProject,
   hasUnpushed,
   isTidraBranch,
   openPullRequest,
   pullTarget,
-  updateBranchPlan,
 } from "@/services/pull-requests";
 import { jsonResponse, memoryIo, ok } from "../support/memory-io";
 import { testServices } from "../support/services";
-
-const onBranch = (branch: string) => (program: string, args: string[]) =>
-  program === "git" && args[0] === "status" ? ok(`# branch.oid a\n# branch.head ${branch}\n`) : ok();
-
-describe("updateBranchPlan", () => {
-  it("keeps adding to an update branch that has no merged pull request", async () => {
-    const io = memoryIo({}, { run: onBranch("tidra/deps-20261031-1437") });
-    const { svc, close } = await testServices(io);
-    const plan = await updateBranchPlan(svc, { path: "/r", remote: null, updateOnBranch: true }, "tidra/deps-new");
-    close();
-    expect(plan).toEqual({});
-    expect(io.runs.some((r) => r.args[0] === "switch")).toBe(false);
-  });
-
-  it("starts a new branch from anywhere else", async () => {
-    const { svc, close } = await testServices(memoryIo({}, { run: onBranch("main") }));
-    const plan = await updateBranchPlan(svc, { path: "/r", remote: null, updateOnBranch: true }, "tidra/deps-new");
-    close();
-    expect(plan).toEqual({ branch: "tidra/deps-new" });
-  });
-
-  it("stays on the current branch when branches are off", async () => {
-    const { svc, close } = await testServices(memoryIo({}, { run: onBranch("main") }));
-    const plan = await updateBranchPlan(svc, { path: "/r", remote: null, updateOnBranch: false }, "tidra/deps-new");
-    close();
-    expect(plan).toEqual({});
-  });
-});
 
 const remotes = (upstream?: string) => (_program: string, args: string[]) => {
   if (args.join(" ") === "remote get-url upstream")
@@ -131,6 +103,27 @@ describe("commitProject", () => {
   });
 });
 
+describe("commitToNewBranch", () => {
+  it("moves the uncommitted work to a new branch, commits it there and pushes", async () => {
+    const { io, svc, close } = await stoppedUpdate("chore(deps): bump react 19.2.0 → 19.3.1");
+    const line = await commitToNewBranch(svc, "p1", " tidra/deps-new ");
+    close();
+    const git = io.runs.map((r) => r.args.join(" "));
+    const created = git.indexOf("switch -c tidra/deps-new");
+    const commit = git.findIndex((l) => l.startsWith("commit -m"));
+    expect(created).toBeGreaterThanOrEqual(0);
+    expect(commit).toBeGreaterThan(created);
+    expect(git.findIndex((l) => l.startsWith("push"))).toBeGreaterThan(commit);
+    expect(line).toBe('Committed "chore(deps): bump react 19.2.0 → 19.3.1" on tidra/deps-new and pushed it.');
+  });
+
+  it("needs a branch name", async () => {
+    const { svc, close } = await stoppedUpdate("chore(deps): bump react 19.2.0 → 19.3.1");
+    await expect(commitToNewBranch(svc, "p1", "  ")).rejects.toThrow("Name the branch first.");
+    close();
+  });
+});
+
 describe("openPullRequest", () => {
   const COMMITS = "chore(deps): bump 2 dependencies\n\n- oxfmt 0.75.0 → 0.76.0\n- vite 8.3.4 → 8.3.5\n\x1e\n";
 
@@ -217,37 +210,6 @@ describe("openPullRequest", () => {
     const { svc, close } = await repoWithPulls("tidra/deps-1", [], false);
     await expect(openPullRequest(svc, "p1")).rejects.toThrow("Add a GitHub token in Settings to open pull requests.");
     close();
-  });
-});
-
-describe("updateBranchPlan after a merged pull request", () => {
-  it("starts again from the freshly pulled default branch", async () => {
-    const io = memoryIo(
-      {},
-      {
-        run: (program, args) => {
-          if (program !== "git") return ok();
-          if (args[0] === "status") return ok("# branch.oid a\n# branch.head tidra/deps-old\n");
-          if (args.join(" ") === "remote get-url upstream") return { code: 2, stdout: "", stderr: "" };
-          if (args[0] === "symbolic-ref") return ok("origin/main\n");
-          return ok();
-        },
-        fetch: async () =>
-          jsonResponse([
-            { number: 1, html_url: "u", state: "closed", title: "t", body: null, merged_at: "2026-11-01T00:00:00Z" },
-          ]),
-      },
-    );
-    const { svc, close } = await testServices(io);
-    await svc.setSecret(SECRET_KEYS.github, "ghp_test");
-    const plan = await updateBranchPlan(
-      svc,
-      { path: "/r", remote: "github.com/me/app", updateOnBranch: true },
-      "tidra/deps-new",
-    );
-    close();
-    expect(plan).toEqual({ branch: "tidra/deps-new" });
-    expect(io.runs.map((r) => r.args.join(" "))).toEqual(expect.arrayContaining(["switch main", "pull --ff-only"]));
   });
 });
 

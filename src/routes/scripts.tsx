@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Play, RotateCcw, Search, Square, SquareTerminal, Trash2, X } from "lucide-react";
+import { Play, RotateCcw, Search, Square, Trash2, X } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import { useReports } from "@/app/queries";
 import { useApp } from "@/app/services";
@@ -112,7 +112,7 @@ function Launcher() {
                 onClick={() => setSelection({ kind: "project", id: project.id })}
                 className={cn(
                   "flex h-10 w-full items-center gap-2 border-b border-line px-4 text-left hover:bg-hover",
-                  current?.kind === "project" && current.id === project.id && "bg-raised",
+                  current?.kind === "project" && current.id === project.id && "bg-selected",
                 )}
               >
                 <span className="min-w-0 flex-1 truncate">{project.name}</span>
@@ -147,7 +147,7 @@ function Launcher() {
           ) : current?.kind === "project" ? (
             <ProjectScripts row={rows.find((r) => r.project.id === current.id)} onRun={run} />
           ) : (
-            <Empty icon={<SquareTerminal />} title="No scripts" />
+            <Empty title="No scripts" />
           )}
         </ErrorBoundary>
       }
@@ -171,7 +171,7 @@ function ProcessItem({ proc, selected, onSelect }: { proc: ManagedProcess; selec
       onClick={onSelect}
       className={cn(
         "flex w-full items-center gap-2.5 border-b border-line px-4 py-2 text-left hover:bg-hover",
-        selected && "bg-raised",
+        selected && "bg-selected",
       )}
     >
       <span

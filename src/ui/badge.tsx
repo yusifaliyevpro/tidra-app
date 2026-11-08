@@ -5,12 +5,12 @@ import type { Bump } from "@/engine/versions";
 import { BUMP_TONE, SEVERITY_TONE, type Tone } from "./tone";
 
 const TONES: Record<Tone, string> = {
-  neutral: "bg-raised text-muted border-line",
-  ok: "bg-ok/10 text-ok border-ok/20",
-  warn: "bg-warn/10 text-warn border-warn/20",
-  bad: "bg-bad/10 text-bad border-bad/20",
-  info: "bg-info/10 text-info border-info/20",
-  accent: "bg-accent/10 text-accent border-accent/25",
+  neutral: "bg-selected text-muted",
+  ok: "bg-ok/13 text-ok",
+  warn: "bg-warn/13 text-warn",
+  bad: "bg-bad/13 text-bad",
+  info: "bg-info/13 text-info",
+  accent: "bg-accent-bg text-accent-text",
 };
 
 export function Badge({
@@ -28,7 +28,7 @@ export function Badge({
     <span
       title={title}
       className={cn(
-        "inline-flex h-[18px] shrink-0 items-center gap-1 rounded-sm border px-1.5 text-xs font-medium whitespace-nowrap",
+        "inline-flex h-[18px] shrink-0 items-center gap-1 rounded-sm px-1.5 text-xs font-medium whitespace-nowrap",
         TONES[tone],
         className,
       )}
@@ -49,7 +49,7 @@ export function SeverityBadge({ severity }: { severity: Severity }) {
 /** Small colored dot for list rows where a full badge is too loud. */
 export function Dot({ tone, title }: { tone: Tone; title?: string }) {
   const color = {
-    neutral: "bg-faint",
+    neutral: "bg-ghost",
     ok: "bg-ok",
     warn: "bg-warn",
     bad: "bg-bad",

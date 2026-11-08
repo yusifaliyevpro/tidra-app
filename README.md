@@ -5,16 +5,16 @@
 <p align="center">Keep every project you maintain up to date, from one desktop app.</p>
 
 <p align="center">
-  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.6/Tidra_0.1.6_x64-setup.exe"><img src="https://img.shields.io/badge/Windows-Download-3a74d8?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" /></a>
-  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.6/Tidra_0.1.6_universal.dmg"><img src="https://img.shields.io/badge/macOS-Download-3a74d8?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
-  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.6/Tidra_0.1.6_amd64.AppImage"><img src="https://img.shields.io/badge/Linux-Download-3a74d8?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux (AppImage)" /></a>
+  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v1.0.0/Tidra_1.0.0_x64-setup.exe"><img src="https://img.shields.io/badge/Windows-Download-3a74d8?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" /></a>
+  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v1.0.0/Tidra_1.0.0_universal.dmg"><img src="https://img.shields.io/badge/macOS-Download-3a74d8?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
+  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v1.0.0/Tidra_1.0.0_amd64.AppImage"><img src="https://img.shields.io/badge/Linux-Download-3a74d8?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux (AppImage)" /></a>
 </p>
 
 <p align="center">
   <sub>
     Windows x64 · macOS (Apple silicon and Intel) · Linux x64:
-    <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.6/Tidra_0.1.6_amd64.deb">.deb</a>,
-    <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v0.1.6/Tidra-0.1.6-1.x86_64.rpm">.rpm</a>,
+    <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v1.0.0/Tidra_1.0.0_amd64.deb">.deb</a>,
+    <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v1.0.0/Tidra-1.0.0-1.x86_64.rpm">.rpm</a>,
     <a href="https://github.com/yusifaliyevpro/tidra-app/releases/latest">all releases</a>
   </sub>
 </p>
@@ -52,7 +52,7 @@ The installers are not code-signed yet, so the first launch shows a warning:
 - **Deploys** (Vercel, Netlify, Cloudflare Pages), **My packages** (npm downloads, stars, issues), **Toolchain** updates, **Scripts and ports**.
 - **AI summaries** of breaking changes with your own API key (optional).
 - **Sync** across devices through your own Turso or Supabase database, end-to-end encrypted with your vault password (optional).
-- Tray icon, background checks, native notifications, global hotkey, Ctrl+P command palette (configurable).
+- Tray icon, background checks, native notifications, global hotkey, Ctrl+K command palette (configurable).
 
 Works with pnpm, npm, yarn (classic and berry) and bun projects, including workspaces and pnpm catalogs.
 

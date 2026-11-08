@@ -15,6 +15,7 @@
     "core:window:allow-is-visible",
     "core:window:allow-is-focused",
     "core:window:allow-unminimize",
+    "core:window:allow-set-theme",
     "notification:default",
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",

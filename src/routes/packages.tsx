@@ -1,7 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import * as z from "@zod/mini";
-import { Package } from "lucide-react";
 import { useState } from "react";
 import { usePackages, useSetting } from "@/app/queries";
 import { useServices } from "@/app/services";
@@ -33,11 +32,19 @@ function Packages() {
     },
     onError: toastError,
   });
+  const changeAccount = useMutation({
+    mutationFn: async () => {
+      setDraft(username ?? "");
+      await svc.store.setSetting(NPM_USERNAME_SETTING, "");
+      await queryClient.invalidateQueries({ queryKey: ["setting", NPM_USERNAME_SETTING] });
+    },
+    onError: toastError,
+  });
 
   if (!username) {
     return (
-      <Page title="My packages">
-        <Empty icon={<Package />} title="Which npm account is yours?">
+      <Page title="Packages">
+        <Empty title="Which npm account is yours?">
           <div className="mt-3 flex gap-2">
             <Input
               value={draft}
@@ -55,7 +62,17 @@ function Packages() {
   }
 
   return (
-    <Page title="My packages" subtitle={`npm: ${username}`} actions={<JobRefresh jobId="packages" />}>
+    <Page
+      title="Packages"
+      actions={
+        <>
+          <Button size="sm" variant="ghost" title="Change npm account" onClick={() => changeAccount.mutate()}>
+            npm: {username}
+          </Button>
+          <JobRefresh jobId="packages" />
+        </>
+      }
+    >
       <div className="mx-auto flex max-w-5xl flex-col gap-3 p-5">
         {data?.error ? <ErrorNote>{data.error}</ErrorNote> : null}
         <Card>

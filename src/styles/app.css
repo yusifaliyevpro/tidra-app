@@ -2,46 +2,128 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Dark is the default; [data-theme="light"] below overrides the same names, so every utility follows the theme. */
 @theme {
-  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Geist Mono Variable", ui-monospace, "Cascadia Code", monospace;
+  --font-sans: "Geist Variable", "Segoe UI Variable Text", system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", "Cascadia Code", ui-monospace, monospace;
 
-  --color-bg: #0b0b0c;
-  --color-surface: #111113;
-  --color-raised: #17171a;
-  --color-hover: #1d1d21;
-  --color-line: rgb(255 255 255 / 0.07);
-  --color-line-strong: rgb(255 255 255 / 0.12);
-  --color-fg: #ededed;
-  --color-muted: #8b8b90;
-  --color-faint: #5d5d63;
+  --color-bg: #09090b;
+  --color-canvas: #111114;
+  --color-surface: #17171b;
+  --color-raised: #1d1d22;
+  --color-hover: rgb(255 255 255 / 0.045);
+  --color-selected: rgb(255 255 255 / 0.08);
+  --color-line: rgb(255 255 255 / 0.065);
+  --color-line-strong: rgb(255 255 255 / 0.11);
+  --color-fg: #ededf0;
+  --color-muted: #9d9da7;
+  --color-faint: #85858f;
+  --color-ghost: #3f3f47;
+  --color-log: #0b0b0d;
+  --color-scrim: rgb(0 0 0 / 0.55);
 
-  --color-accent: var(--accent, #3a74d8);
+  --color-accent: var(--accent, #4565e8);
   --color-accent-fg: #ffffff;
+  --color-accent-hover: color-mix(in oklab, var(--color-accent) 88%, black);
+  --color-accent-text: color-mix(in oklab, var(--color-accent) 50%, white);
+  --color-accent-bg: color-mix(in oklab, var(--color-accent) 18%, transparent);
+  --color-focus: color-mix(in oklab, var(--color-accent) 75%, white);
 
-  --color-ok: #4ade80;
-  --color-warn: #fbbf24;
-  --color-bad: #f87171;
-  --color-info: #60a5fa;
+  --color-ok: #4cc38a;
+  --color-warn: #e8ad42;
+  --color-bad: #f26b67;
+  --color-info: #71a9ff;
 
   --text-xs: 11px;
-  --text-xs--line-height: 16px;
+  --text-xs--line-height: 14px;
   --text-sm: 12px;
-  --text-sm--line-height: 18px;
+  --text-sm--line-height: 16px;
   --text-base: 13px;
   --text-base--line-height: 20px;
-  --text-lg: 15px;
-  --text-lg--line-height: 22px;
-  --text-xl: 18px;
-  --text-xl--line-height: 26px;
-  --text-2xl: 26px;
-  --text-2xl--line-height: 32px;
+  --text-lg: 14px;
+  --text-lg--line-height: 20px;
+  --text-xl: 20px;
+  --text-xl--line-height: 24px;
+  --text-2xl: 22px;
+  --text-2xl--line-height: 28px;
+
+  --font-weight-normal: 420;
+  --font-weight-medium: 540;
+  --font-weight-semibold: 600;
 
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
+  --radius-xl: 12px;
 
-  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --shadow-pop: 0 10px 30px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.35);
+  --shadow-dialog: 0 24px 64px rgb(0 0 0 / 0.6), 0 4px 12px rgb(0 0 0 / 0.4);
+  --shadow-canvas: 0 0 0 0 transparent;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+
+  --animate-pop-in: pop-in 140ms var(--ease-out);
+  --animate-dialog-in: dialog-in 200ms var(--ease-out);
+  --animate-rise-in: rise-in 200ms var(--ease-out);
+  --animate-progress: progress 1.2s var(--ease-out) infinite;
+  --animate-glyph-spin: spin 2.4s linear infinite;
+
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
+  @keyframes dialog-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px) scale(0.98);
+    }
+  }
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+  @keyframes progress {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(260%);
+    }
+  }
+}
+
+:root[data-theme="light"] {
+  --color-bg: #f2f2f4;
+  --color-canvas: #ffffff;
+  --color-surface: #ffffff;
+  --color-raised: #ffffff;
+  --color-hover: rgb(16 16 24 / 0.04);
+  --color-selected: rgb(16 16 24 / 0.065);
+  --color-line: rgb(16 16 24 / 0.075);
+  --color-line-strong: rgb(16 16 24 / 0.13);
+  --color-fg: #1a1a1f;
+  --color-muted: #5d5d68;
+  --color-faint: #6e6e79;
+  --color-ghost: #c4c4cc;
+  --color-log: #f7f7f9;
+  --color-scrim: rgb(18 18 26 / 0.28);
+  --color-accent-hover: color-mix(in oklab, var(--color-accent) 88%, black);
+  --color-accent-text: color-mix(in oklab, var(--color-accent) 85%, black);
+  --color-accent-bg: color-mix(in oklab, var(--color-accent) 10%, transparent);
+  --color-focus: var(--color-accent);
+  --color-ok: #1a7f4e;
+  --color-warn: #9a6100;
+  --color-bad: #cc3633;
+  --color-info: #2d68d4;
+  --shadow-pop: 0 10px 30px rgb(16 16 24 / 0.12), 0 2px 6px rgb(16 16 24 / 0.06);
+  --shadow-dialog: 0 24px 64px rgb(16 16 24 / 0.18), 0 4px 12px rgb(16 16 24 / 0.08);
+  --shadow-canvas: 0 1px 2px rgb(16 16 24 / 0.06);
 }
 
 @layer base {
@@ -55,10 +137,17 @@
     color-scheme: dark;
     background: var(--color-bg);
   }
+  html[data-theme="light"] {
+    color-scheme: light;
+  }
 
   /* Mica shows through only behind the sidebar; the rest stays opaque for legibility. */
   html.native {
     background: transparent;
+  }
+  /* A tint of the ground keeps the sidebar legible even when Mica follows a different system theme. */
+  html.native body {
+    background: color-mix(in oklab, var(--color-bg) 72%, transparent);
   }
 
   body {
@@ -106,7 +195,7 @@
   }
 
   :focus-visible {
-    outline: 1.5px solid var(--color-accent);
+    outline: 2px solid var(--color-focus);
     outline-offset: 1px;
   }
 
@@ -119,13 +208,13 @@
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgb(255 255 255 / 0.08);
+    background: color-mix(in oklab, var(--color-fg) 12%, transparent);
     border: 3px solid transparent;
     border-radius: 999px;
     background-clip: content-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background-color: rgb(255 255 255 / 0.16);
+    background-color: color-mix(in oklab, var(--color-fg) 24%, transparent);
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -133,6 +222,7 @@
     *::before,
     *::after {
       animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
     }
   }
@@ -172,7 +262,7 @@
 .markdown h2,
 .markdown h3,
 .markdown h4 {
-  font-weight: 500;
+  font-weight: 540;
   margin: 1em 0 0.4em;
   font-size: var(--text-base);
 }
@@ -196,7 +286,7 @@
   list-style: decimal;
 }
 .markdown a {
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 .markdown code {
   font-family: var(--font-mono);
