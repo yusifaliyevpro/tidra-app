@@ -59,9 +59,6 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           assignee_trigger: yusifaliyevpro
-          # Commits go out as the owner, so a squash merge has one author and GitHub adds no Co-authored-by line.
-          bot_id: "114253515"
-          bot_name: yusifaliyevpro
           base_branch: main
           branch_prefix: claude/
           track_progress: true
