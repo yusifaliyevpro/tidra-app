@@ -25,8 +25,8 @@
     "release": "node scripts/release.ts"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "4.0.98",
-    "@ai-sdk/openai-compatible": "3.0.86",
+    "@ai-sdk/anthropic": "4.0.99",
+    "@ai-sdk/openai-compatible": "3.0.87",
     "@fontsource-variable/geist": "5.3.0",
     "@fontsource-variable/geist-mono": "5.3.0",
     "@libsql/client": "0.18.0",
@@ -45,7 +45,7 @@
     "@tauri-apps/plugin-updater": "2.14.1",
     "@tauri-apps/plugin-window-state": "2.5.0",
     "@zod/mini": "4.6.7",
-    "ai": "7.0.164",
+    "ai": "7.0.165",
     "cmdk": "1.1.1",
     "cn": "0.5.2",
     "dompurify": "3.4.17",
@@ -64,7 +64,7 @@
   "devDependencies": {
     "@rolldown/plugin-babel": "0.3.0",
     "@tailwindcss/vite": "4.3.5",
-    "@tanstack/router-plugin": "1.168.48",
+    "@tanstack/router-plugin": "1.169.0",
     "@tauri-apps/cli": "2.12.4",
     "@testing-library/dom": "10.4.2",
     "@testing-library/react": "16.3.3",
