@@ -12,7 +12,7 @@ import { createGit } from "@/engine/git";
 import { createLimit } from "@/engine/limit";
 import { join } from "@/engine/path";
 import type { Services } from "./context";
-import { refreshProject } from "./projects";
+import { checkoutRoot, refreshProject } from "./projects";
 import { ACTIONS_BRANCH_PREFIX } from "./pull-requests";
 import { listRepos, type RepoGroup } from "./repos";
 import { cached, HOUR, readSnapshot, readSnapshots, writeSnapshot } from "./snapshot";
@@ -252,8 +252,13 @@ export async function setToolVersion(
 
 /** Another branch or pulled commits can bring other workflows: rescans the repos these packages live in. */
 export async function rescanActionsOf(svc: Services, projectIds: string[]) {
-  const repos = (await listRepos(svc)).filter((repo) => repo.projects.some((p) => projectIds.includes(p.id)));
-  await Promise.all(repos.map((repo) => scanActions(svc, repo)));
+  // From the project list, not listRepos: that reads every report, and this runs on each branch switch.
+  const roots = new Map<string, string>();
+  for (const project of await svc.store.listProjects()) {
+    const root = checkoutRoot(project);
+    if (root && projectIds.includes(project.id)) roots.set(project.remote ?? root, root);
+  }
+  await Promise.all([...roots].map(([key, root]) => scanActions(svc, { key, root })));
   svc.invalidate(["actions"]);
 }
 

@@ -137,6 +137,18 @@ describe("homeSummary", () => {
     expect(summary.ci.failing).toEqual([]);
   });
 
+  it("fails the repo when any workflow's latest run on the default branch failed", async () => {
+    const { svc, close } = await setup();
+    const runs = [
+      run({ id: 3, name: "Deploy", conclusion: "success" }),
+      run({ id: 2, name: "CI", conclusion: "failure", html_url: "https://github.com/me/app/actions/runs/2" }),
+    ];
+    await writeSnapshot(svc, "ci", ci(runs));
+    const summary = await homeSummary(svc);
+    close();
+    expect(summary.ci.repos[0]).toMatchObject({ state: "failure", url: "https://github.com/me/app/actions/runs/2" });
+  });
+
   it("treats timed out runs as failing", async () => {
     const { svc, close } = await setup();
     await writeSnapshot(svc, "ci", ci([run({ conclusion: "timed_out" })]));

@@ -307,7 +307,7 @@ export function createGitHub(options: {
     workflowRuns: async (repo: string, branch?: string) =>
       (
         await json(
-          `/repos/${repo}/actions/runs?per_page=40${branch ? `&branch=${encodeURIComponent(branch)}` : ""}`,
+          `/repos/${repo}/actions/runs?per_page=100${branch ? `&branch=${encodeURIComponent(branch)}` : ""}`,
           Runs,
         )
       ).workflow_runs,

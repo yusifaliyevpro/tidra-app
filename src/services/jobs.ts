@@ -108,9 +108,14 @@ async function refreshTimeline(svc: Services) {
 async function refreshCiAndNotify(svc: Services) {
   const snapshot = await refreshCi(svc);
   const failed = snapshot.entries.flatMap((entry) => {
-    const run = entry.runs.find((r) => r.status === "completed" && r.head_branch === entry.defaultBranch);
-    const fresh = run && Date.now() - Date.parse(run.created_at) < RECENT_MS;
-    return fresh && runFailed(run) ? [{ entry, run }] : [];
+    // currentRuns keeps each workflow's latest run, so every failing workflow is checked, not just the newest run.
+    const runs = entry.runs.filter((r) => r.status === "completed" && r.head_branch === entry.defaultBranch);
+    return runs
+      .filter((run) => runFailed(run) && Date.now() - Date.parse(run.created_at) < RECENT_MS)
+      .map((run) => ({
+        entry,
+        run,
+      }));
   });
   await Promise.all(
     failed.map(({ entry, run }) =>
