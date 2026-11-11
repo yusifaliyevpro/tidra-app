@@ -92,20 +92,69 @@ export async function runRepoAction(svc: Services, repo: RepoGroup, action: Repo
   return done;
 }
 
-/** Local branches, then origin's branches that have no local copy yet; `git switch` creates those on demand. */
-export async function listBranches(svc: Services, projectId: string): Promise<{ name: string; remote: boolean }[]> {
+export interface BranchEntry {
+  name: string;
+  /** Only on origin: `git switch` creates the local copy on demand. */
+  remote: boolean;
+  onOrigin: boolean;
+  isDefault: boolean;
+}
+
+/** Local branches, then origin's branches that have no local copy yet. */
+export async function listBranches(svc: Services, projectId: string): Promise<BranchEntry[]> {
   const { root } = await checkoutOf(svc, projectId);
   const git = createGit(svc.io, root);
   const refs = (place: string) =>
     git.run(["for-each-ref", "--sort=-committerdate", "--format=%(refname:lstrip=2)", place]);
-  const [local, remote] = await Promise.all([refs("refs/heads"), refs("refs/remotes/origin")]);
+  const [local, remote, defaultName] = await Promise.all([
+    refs("refs/heads"),
+    refs("refs/remotes/origin"),
+    git.defaultBranch(),
+  ]);
   const locals = local.split("\n").filter(Boolean);
   const have = new Set(locals);
-  const remotes = remote
-    .split("\n")
-    .map((ref) => ref.replace(/^origin\//, ""))
-    .filter((name) => name && name !== "HEAD" && name !== "origin" && !have.has(name));
-  return [...locals.map((name) => ({ name, remote: false })), ...remotes.map((name) => ({ name, remote: true }))];
+  const origin = new Set(
+    remote
+      .split("\n")
+      .map((ref) => ref.replace(/^origin\//, ""))
+      .filter((name) => name && name !== "HEAD" && name !== "origin"),
+  );
+  const entry = (name: string, remoteOnly: boolean): BranchEntry => ({
+    name,
+    remote: remoteOnly,
+    onOrigin: origin.has(name),
+    isDefault: name === defaultName,
+  });
+  return [
+    ...locals.map((name) => entry(name, false)),
+    ...[...origin].filter((name) => !have.has(name)).map((name) => entry(name, true)),
+  ];
+}
+
+/**
+ * Deletes a branch here and its copy on origin, merged or not: confirming is the caller's job. The checked-out and
+ * default branches are refused. Returns a line for the toast.
+ */
+export async function deleteBranchEverywhere(svc: Services, projectId: string, name: string): Promise<string> {
+  const { root, projectIds } = await checkoutOf(svc, projectId);
+  const git = createGit(svc.io, root);
+  const exists = async (ref: string) => (await git.raw(["rev-parse", "--verify", "--quiet", ref])).code === 0;
+  const [status, defaultName, local, onOrigin] = await Promise.all([
+    git.status(),
+    git.defaultBranch(),
+    exists(`refs/heads/${name}`),
+    exists(`refs/remotes/origin/${name}`),
+  ]);
+  if (name === status.branch) throw new Error(`${name} is checked out. Switch to another branch first.`);
+  if (name === defaultName) throw new Error(`${name} is the default branch and can't be deleted here.`);
+  if (onOrigin) await git.deleteRemoteBranch(name);
+  if (local) await git.deleteBranch(name);
+  await showGitState(svc, root, projectIds);
+  return local && onOrigin
+    ? `Deleted ${name} here and on origin.`
+    : onOrigin
+      ? `Deleted ${name} on origin.`
+      : `Deleted ${name}.`;
 }
 
 export interface BranchDetail {

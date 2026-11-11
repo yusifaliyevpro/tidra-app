@@ -1,3 +1,5 @@
+import { shortAge } from "@/engine/age";
+
 const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ["year", 31_536_000],
   ["month", 2_592_000],
@@ -27,5 +29,18 @@ export function TimeAgo({ value }: { value: string | number | undefined }) {
     >
       {relativeTime(value)}
     </time>
+  );
+}
+
+/** How long ago a version was published, in a fixed-width slot so rows line up. */
+export function ReleaseAge({ value }: { value: string | undefined }) {
+  return (
+    <span className="w-8 shrink-0 text-right text-sm text-faint tabular">
+      {value ? (
+        <time dateTime={value} title={`Published ${new Date(value).toLocaleString()}`}>
+          {shortAge(value)}
+        </time>
+      ) : null}
+    </span>
   );
 }

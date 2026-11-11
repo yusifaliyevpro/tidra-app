@@ -6,7 +6,14 @@ import type { RunResult } from "@/engine/io";
 import { readCi, refreshCi } from "@/services/github-feed";
 import { fetchProject, readReport, refreshProject, reportKey } from "@/services/projects";
 import { refreshRepos } from "@/services/repo-refresh";
-import { listBranches, listRepos, runRepoAction, switchBranch, syncRepo } from "@/services/repos";
+import {
+  deleteBranchEverywhere,
+  listBranches,
+  listRepos,
+  runRepoAction,
+  switchBranch,
+  syncRepo,
+} from "@/services/repos";
 import { writeSnapshot } from "@/services/snapshot";
 import { jsonResponse, memoryIo, ok } from "../support/memory-io";
 import { projectReport, testServices } from "../support/services";
@@ -16,6 +23,7 @@ const repoFiles = { "/code/app/package.json": JSON.stringify({ name: "app" }) };
 const git = (program: string, args: string[]) => {
   if (program !== "git") return ok();
   const line = args.join(" ");
+  if (line === "symbolic-ref --short refs/remotes/origin/HEAD") return ok("origin/main\n");
   if (line.includes("refs/heads")) return ok("main\nfeature/a\n");
   if (line.includes("refs/remotes/origin")) return ok("origin/HEAD\norigin\norigin/main\norigin/feature/b\n");
   if (args[0] === "status") return ok("# branch.oid a\n# branch.head main\n");
@@ -36,10 +44,48 @@ describe("listBranches", () => {
     const branches = await listBranches(svc, "p1");
     close();
     expect(branches).toEqual([
-      { name: "main", remote: false },
-      { name: "feature/a", remote: false },
-      { name: "feature/b", remote: true },
+      { name: "main", remote: false, onOrigin: true, isDefault: true },
+      { name: "feature/a", remote: false, onOrigin: false, isDefault: false },
+      { name: "feature/b", remote: true, onOrigin: true, isDefault: false },
     ]);
+  });
+});
+
+const withRefs = async (refs: string[]) => {
+  const io = memoryIo(repoFiles, {
+    run: (program, args) =>
+      args[0] === "rev-parse"
+        ? refs.includes(args.at(-1) ?? "")
+          ? ok("abc\n")
+          : { ...ok(), code: 1 }
+        : git(program, args),
+  });
+  const { svc, close } = await testServices(io);
+  await svc.store.addProject({ id: "p1", name: "app", remote: "github.com/me/app", path: "/code/app" });
+  return { io, svc, close };
+};
+const ran = (io: { runs: { args: string[] }[] }) => io.runs.map((r) => r.args.join(" "));
+
+describe("deleteBranchEverywhere", () => {
+  it("deletes the local branch and its copy on origin", async () => {
+    const { io, svc, close } = await withRefs(["refs/heads/feature/a", "refs/remotes/origin/feature/a"]);
+    expect(await deleteBranchEverywhere(svc, "p1", "feature/a")).toBe("Deleted feature/a here and on origin.");
+    close();
+    expect(ran(io)).toEqual(expect.arrayContaining(["push origin --delete feature/a", "branch -D feature/a"]));
+  });
+
+  it("deletes a branch that only exists on origin", async () => {
+    const { io, svc, close } = await withRefs(["refs/remotes/origin/feature/b"]);
+    expect(await deleteBranchEverywhere(svc, "p1", "feature/b")).toBe("Deleted feature/b on origin.");
+    close();
+    expect(ran(io).some((l) => l.startsWith("branch -D"))).toBe(false);
+  });
+
+  it("refuses the checked-out and the default branch", async () => {
+    const { io, svc, close } = await withRefs(["refs/heads/main"]);
+    await expect(deleteBranchEverywhere(svc, "p1", "main")).rejects.toThrow("checked out");
+    close();
+    expect(ran(io).some((l) => l.startsWith("push") || l.startsWith("branch -D"))).toBe(false);
   });
 });
 

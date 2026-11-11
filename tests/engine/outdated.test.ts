@@ -143,10 +143,14 @@ describe("computeOutdated", () => {
     expect(result.entries.map((e) => e.name)).toEqual(["react"]);
   });
 
-  it("only fetches full metadata when release age matters", async () => {
+  it("fetches full metadata, for publish times, only for packages with a newer version", async () => {
     const registry = fakeRegistry(docs);
-    await computeOutdated(await workspaceWith({ dependencies: { react: "^18.0.0" } }), registry, { now: NOW });
-    expect(registry.fullCalls).toEqual([]);
+    const ws = await workspaceWith(
+      { dependencies: { react: "^18.0.0", zod: "^4.6.0" } },
+      pnpmLock({ react: "18.3.1", zod: "4.6.7" }),
+    );
+    await computeOutdated(ws, registry, { now: NOW });
+    expect(registry.fullCalls).toEqual(["react"]);
   });
 });
 
@@ -165,6 +169,7 @@ describe("pickLatest with minimumReleaseAge", () => {
     expect(pickLatest(doc, "8.3.0", { pinMajor: false, minAgeMinutes: 1440, now: NOW })).toEqual({
       version: "8.3.4",
       heldBackByAge: true,
+      newest: "8.3.5",
     });
   });
 
@@ -175,26 +180,34 @@ describe("pickLatest with minimumReleaseAge", () => {
     });
   });
 
-  it("offers an excluded package's newest version but flags it as younger than the minimum age", async () => {
-    const ws = await workspaceWith({ dependencies: { vite: "8.3.4" } }, pnpmLock({ vite: "8.3.4" }), ageYaml("vite"));
-    const [entry] = (await computeOutdated(ws, fakeRegistry([doc]), { now: NOW })).entries;
-    expect(entry).toMatchObject({
-      latest: "8.3.5",
-      heldBackByAge: false,
-      newerThanReleaseAge: { publishedAt: daysAgo(0.2), minAgeMinutes: 1440 },
-    });
+  it("offers the newest old-enough version and says a newer one is held back", async () => {
+    const ws = await workspaceWith({ dependencies: { vite: "8.3.0" } }, pnpmLock({ vite: "8.3.0" }), ageYaml("x"));
+    const result = await computeOutdated(ws, fakeRegistry([doc]), { now: NOW });
+    expect(result.entries).toMatchObject([{ latest: "8.3.4", heldBackByAge: true, publishedAt: daysAgo(5) }]);
+    expect(result.waiting).toEqual([]);
   });
 
-  it("doesn't flag a version that is old enough", async () => {
-    const old = packument(
-      "vite",
-      { "8.3.4": { time: daysAgo(9) }, "8.3.5": { time: daysAgo(5) } },
-      { latest: "8.3.5" },
-    );
+  it("lists an update whose versions are all too young as waiting, with when it becomes installable", async () => {
+    const ws = await workspaceWith({ dependencies: { vite: "8.3.4" } }, pnpmLock({ vite: "8.3.4" }), ageYaml("x"));
+    const result = await computeOutdated(ws, fakeRegistry([doc]), { now: NOW });
+    expect(result.entries).toEqual([]);
+    expect(result.waiting).toMatchObject([
+      { latest: "8.3.5", heldBackByAge: false, publishedAt: daysAgo(0.2), readyAt: daysAgo(-0.8) },
+    ]);
+  });
+
+  it("never offers a too-young version as the in-range target", async () => {
+    const ws = await workspaceWith({ dependencies: { vite: "^8.3.0" } }, pnpmLock({ vite: "8.3.0" }), ageYaml("x"));
+    const [entry] = (await computeOutdated(ws, fakeRegistry([doc]), { now: NOW })).entries;
+    expect(entry?.wanted).toBe("8.3.4");
+  });
+
+  it("offers an excluded package's newest version as a plain update", async () => {
     const ws = await workspaceWith({ dependencies: { vite: "8.3.4" } }, pnpmLock({ vite: "8.3.4" }), ageYaml("vite"));
-    const [entry] = (await computeOutdated(ws, fakeRegistry([old]), { now: NOW })).entries;
-    expect(entry?.latest).toBe("8.3.5");
-    expect(entry?.newerThanReleaseAge).toBeUndefined();
+    const result = await computeOutdated(ws, fakeRegistry([doc]), { now: NOW });
+    expect(result.entries).toMatchObject([{ latest: "8.3.5", heldBackByAge: false }]);
+    expect(result.entries[0]?.readyAt).toBeUndefined();
+    expect(result.waiting).toEqual([]);
   });
 });
 
@@ -248,6 +261,7 @@ describe("computeOutdated edge cases", () => {
   it("reports nothing for a project without dependencies", async () => {
     expect(await computeOutdated(await workspaceWith({ name: "empty" }), fakeRegistry(docs), { now: NOW })).toEqual({
       entries: [],
+      waiting: [],
       errors: [],
     });
   });
@@ -297,6 +311,7 @@ describe("pickLatest edge cases", () => {
     expect(pickLatest(doc, "1.0.0", { pinMajor: false, minAgeMinutes: 1440, now: NOW })).toEqual({
       version: "1.0.0",
       heldBackByAge: true,
+      newest: "1.2.0",
     });
   });
 

@@ -10,6 +10,16 @@ export function runTone(run: WorkflowRun): { tone: Tone; label: string } {
   return { tone: "neutral", label: run.conclusion ?? "done" };
 }
 
-/** The latest run on the default branch, else the latest run at all. */
-export const latestRun = (entry: CiEntry) =>
-  entry.runs.find((r) => r.head_branch === entry.defaultBranch) ?? entry.runs[0];
+/**
+ * The run that speaks for the default branch: each workflow's latest run counts, so one failing workflow fails the
+ * repo even when another ran after it. Then one still running, then the newest.
+ */
+export function defaultBranchRun(entry: CiEntry): WorkflowRun | undefined {
+  const runs = entry.runs.filter((r) => r.head_branch === entry.defaultBranch);
+  return (
+    runs.find((r) => r.status === "completed" && runFailed(r)) ?? runs.find((r) => r.status !== "completed") ?? runs[0]
+  );
+}
+
+/** The default branch's run, else the latest run at all. */
+export const latestRun = (entry: CiEntry) => defaultBranchRun(entry) ?? entry.runs[0];

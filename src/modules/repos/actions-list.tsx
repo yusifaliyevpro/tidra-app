@@ -21,7 +21,7 @@ import { toast, toastError } from "@/ui/toast";
 const shortRef = (ref: string) => (/^[0-9a-f]{40}$/.test(ref) ? ref.slice(0, 7) : ref);
 const itemKey = (item: ActionItem) => `${item.file}:${item.line}`;
 
-/** A repo's workflow actions; outdated ones commit on a `tidra/actions-<date>` branch cut from the default branch. */
+/** A repo's workflow actions; updates commit on the current branch. */
 export function ActionsList({ repo, report }: { repo: RepoGroup; report: ActionsReport | undefined }) {
   const svc = useServices();
   const items = report?.items ?? [];
@@ -111,7 +111,7 @@ export function ActionsList({ repo, report }: { repo: RepoGroup; report: Actions
   );
 }
 
-/** The tool version a setup step pins (`node-version: 24`); a plain value edits in place and commits like an update. */
+/** The tool version a setup step pins (`node-version: 24`); a plain value edits in place and commits on the current branch. */
 function ToolVersion({ repoKey, item, input }: { repoKey: string; item: ActionItem; input: ToolInput }) {
   const svc = useServices();
   const [draft, setDraft] = useState<string | undefined>(undefined);

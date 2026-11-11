@@ -12,11 +12,9 @@ import { createGit } from "@/engine/git";
 import { createLimit } from "@/engine/limit";
 import { join } from "@/engine/path";
 import type { Services } from "./context";
-import { refreshProject } from "./projects";
-import { ACTIONS_BRANCH_PREFIX } from "./pull-requests";
+import { checkoutRoot, refreshProject } from "./projects";
 import { listRepos, type RepoGroup } from "./repos";
 import { cached, HOUR, readSnapshot, readSnapshots, writeSnapshot } from "./snapshot";
-import { branchName } from "./updates";
 
 export interface ActionItem extends ActionUse {
   file: string;
@@ -126,18 +124,17 @@ export async function readAllActions(svc: Services, known?: RepoGroup[]) {
 }
 
 /**
- * Rewrites the selected refs on a `tidra/actions-<date>` branch cut from the default branch (or keeps adding to the
- * Actions branch already checked out) and commits only the workflow files. Uncommitted work elsewhere is carried
- * along untouched. Returns the commit message and branch for the toast.
+ * Rewrites the selected refs on the current branch and commits only the workflow files; the user picks the branch
+ * beforehand. Uncommitted work elsewhere stays out of the commit. Returns the commit message and branch for the toast.
  */
 export async function applyActionUpdatesToRepo(
   svc: Services,
   repoKey: string,
   items: ActionItem[],
 ): Promise<{ message: string; branch: string }> {
-  const { repo, root, git, branch, undo } = await openActionsBranch(svc, repoKey);
+  const { repo, root, git } = await openRepo(svc, repoKey);
 
-  // The base branch can differ from what was scanned, so updates are matched by action and ref, not line number.
+  // The files can differ from what was scanned, so updates are matched by action and ref, not line number.
   const wanted = items.filter((i) => i.next);
   const applied: ActionItem[] = [];
   await Promise.all(
@@ -157,10 +154,7 @@ export async function applyActionUpdatesToRepo(
       if (updates.length > 0) await svc.io.writeText(path, applyActionUpdates(text, updates));
     }),
   );
-  if (applied.length === 0) {
-    await undo();
-    throw new Error("These actions are already up to date on the default branch.");
-  }
+  if (applied.length === 0) throw new Error("These actions are already up to date on this branch.");
 
   const files = [...new Set(applied.map((i) => i.file))];
   const names = [...new Set(applied.map((i) => i.action))];
@@ -168,33 +162,13 @@ export async function applyActionUpdatesToRepo(
     names.length === 1
       ? `ci: bump ${names[0]} to ${applied[0]?.latestTag ?? "latest"}`
       : `ci: bump ${names.length} GitHub Actions`;
-  await commitWorkflows(svc, repo, git, files, message);
-  return { message, branch };
+  return { message, branch: await commitWorkflows(svc, repo, git, files, message) };
 }
 
-/**
- * Switches to a `tidra/actions-<date>` branch cut from origin's default branch, or stays on the Actions branch already
- * checked out. `undo` goes back and deletes the branch when nothing was changed on it.
- */
-async function openActionsBranch(svc: Services, repoKey: string) {
+async function openRepo(svc: Services, repoKey: string) {
   const repo = (await listRepos(svc)).find((r) => r.key === repoKey);
   if (!repo?.root) throw new Error("This repository has no folder on this device.");
-  const root = repo.root;
-  const git = createGit(svc.io, root);
-  const status = await git.status();
-  if (status.branch?.startsWith(ACTIONS_BRANCH_PREFIX)) {
-    return { repo, root, git, branch: status.branch, undo: async () => {} };
-  }
-  // origin's copy: the local default branch may be behind.
-  const defaultBranch = await git.defaultBranch();
-  const base = defaultBranch ? `origin/${defaultBranch}` : status.branch;
-  const name = branchName(new Date(), ACTIONS_BRANCH_PREFIX);
-  await git.run(["switch", "--no-track", "-c", name, ...(base ? [base] : [])]);
-  const undo = async () => {
-    await git.switchTo(status.branch ?? "-");
-    await git.deleteBranch(name);
-  };
-  return { repo, root, git, branch: name, undo };
+  return { repo, root: repo.root, git: createGit(svc.io, repo.root) };
 }
 
 async function commitWorkflows(
@@ -206,14 +180,16 @@ async function commitWorkflows(
 ) {
   await git.add(files);
   await git.run(["commit", "-m", message, "--", ...files]);
+  const branch = (await git.status()).branch ?? "HEAD";
   await scanActions(svc, repo, { force: true });
   await Promise.all(repo.projects.map((p) => refreshProject(svc, p.id)));
   await svc.queryClient.invalidateQueries({ queryKey: ["actions"] });
+  return branch;
 }
 
 /**
  * Sets a tool version input (setup-node's `node-version`, pnpm's `version`) wherever the same action sets it to the
- * same value in that workflow file, and commits it on the Actions branch like an action update.
+ * same value in that workflow file, and commits it on the current branch: the user picks the branch beforehand.
  */
 export async function setToolVersion(
   svc: Services,
@@ -225,26 +201,39 @@ export async function setToolVersion(
   const next = value.trim();
   if (!next) throw new Error(`Enter a ${input.tool} version.`);
   if (next === input.value) throw new Error(`${input.tool} is already ${next} in this workflow.`);
-  const { repo, root, git, branch, undo } = await openActionsBranch(svc, repoKey);
+  const { repo, root, git } = await openRepo(svc, repoKey);
   const path = join(root, item.file);
   const text = await svc.io.readText(path);
-  // The base branch can differ from what was scanned, so inputs are matched by action, name and value.
+  // The file can differ from what was scanned, so inputs are matched by action, name and value.
   const lines = (text === null ? [] : parseWorkflowUses(text))
     .filter((use) => use.action === item.action)
     .flatMap((use) => use.inputs ?? [])
     .filter((found) => found.name === input.name && found.value === input.value)
     .map((found) => found.line);
   if (text === null || lines.length === 0) {
-    await undo();
-    throw new Error(`${item.file} no longer sets ${input.tool} ${input.value} on the default branch.`);
+    throw new Error(
+      `${item.file} no longer sets ${input.tool} ${input.value}. Check again to see its current version.`,
+    );
   }
   await svc.io.writeText(
     path,
     lines.reduce((current, line) => setInputValue(current, line, next), text),
   );
   const message = `ci: use ${input.tool} ${next}`;
-  await commitWorkflows(svc, repo, git, [item.file], message);
-  return { message, branch };
+  return { message, branch: await commitWorkflows(svc, repo, git, [item.file], message) };
+}
+
+/** Another branch or pulled commits can bring other workflows: rescans the repos these packages live in. */
+export async function rescanActionsOf(svc: Services, projectIds: string[]) {
+  // From the project list, not listRepos: that reads every report, and this runs on each branch switch.
+  const wanted = new Set(projectIds);
+  const roots = new Map<string, string>();
+  for (const project of await svc.store.listProjects()) {
+    const root = checkoutRoot(project);
+    if (root && wanted.has(project.id)) roots.set(project.remote ?? root, root);
+  }
+  await Promise.all([...roots].map(([key, root]) => scanActions(svc, { key, root })));
+  svc.invalidate(["actions"]);
 }
 
 export async function scanAllActions(svc: Services, signal?: AbortSignal) {

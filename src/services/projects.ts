@@ -17,6 +17,8 @@ export interface ProjectReport {
   scripts: Record<string, string>;
   checks: string[];
   outdated: OutdatedEntry[];
+  /** Updates still younger than minimumReleaseAge; missing in reports from older versions. */
+  waiting?: OutdatedEntry[];
   registryErrors: { name: string; message: string }[];
   git?: GitStatus;
   branches: BranchInfo[];
@@ -153,8 +155,8 @@ export async function buildReport(
       previous.fingerprint === workspace.fingerprint &&
       previous.checkedAt &&
       Date.parse(base.updatedAt) - Date.parse(previous.checkedAt) < REUSE_MS;
-    const { entries, errors } = reuse
-      ? { entries: previous.outdated, errors: previous.registryErrors }
+    const { entries, waiting, errors } = reuse
+      ? { entries: previous.outdated, waiting: previous.waiting ?? [], errors: previous.registryErrors }
       : await computeOutdated(workspace, svc.registry(workspace.npm), {
           majorPins: project.majorPins ?? DEFAULT_MAJOR_PINS,
         });
@@ -168,6 +170,7 @@ export async function buildReport(
       scripts: workspace.importers[0]?.manifest.scripts ?? {},
       checks: projectChecks(project, workspace).map((c) => display(c.command)),
       outdated: entries,
+      waiting,
       registryErrors: errors,
       git: gitStatus,
       branches,
@@ -256,6 +259,8 @@ export async function writeGitState(svc: Services, root: string, projectIds: str
 export function refreshInBackground(svc: Services, projectIds: string[]) {
   const gitCache: GitInfoCache = new Map();
   void Promise.all(projectIds.map((id) => refreshProject(svc, id, { gitCache }))).catch(() => undefined);
+  // Loaded on use: actions.ts imports this module.
+  void import("./actions").then(({ rescanActionsOf }) => rescanActionsOf(svc, projectIds)).catch(() => undefined);
 }
 
 export interface Checkout {

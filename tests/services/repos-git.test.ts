@@ -6,7 +6,14 @@ import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Services } from "@/services/context";
 import { readReport, refreshProject } from "@/services/projects";
-import { deleteBranches, listBranchDetails, listBranches, switchBranch, syncRepo } from "@/services/repos";
+import {
+  deleteBranchEverywhere,
+  deleteBranches,
+  listBranchDetails,
+  listBranches,
+  switchBranch,
+  syncRepo,
+} from "@/services/repos";
 import { nodeIo } from "../support/node-io";
 import { testServices } from "../support/services";
 
@@ -116,12 +123,22 @@ describe("branches and sync on real repositories", { timeout: 30_000 }, () => {
     const { work } = originAndClone();
     const svc = await open(work);
     expect(await listBranches(svc, "p1")).toEqual([
-      { name: "main", remote: false },
-      { name: "shared", remote: true },
+      { name: "main", remote: false, onOrigin: true, isDefault: true },
+      { name: "shared", remote: true, onOrigin: true, isDefault: false },
     ]);
     await switchBranch(svc, "p1", "shared");
     expect(git(work, "branch", "--show-current")).toBe("shared");
     expect((await readReport(svc, "p1"))?.git?.branch).toBe("shared");
+  });
+
+  it("deletes a branch here and on origin", async () => {
+    const { work } = originAndClone();
+    const svc = await open(work);
+    git(work, "switch", "--quiet", "shared");
+    git(work, "switch", "--quiet", "main");
+    expect(await deleteBranchEverywhere(svc, "p1", "shared")).toBe("Deleted shared here and on origin.");
+    expect(git(work, "branch", "--list", "shared")).toBe("");
+    expect(git(join(work, "..", "origin.git"), "branch", "--list", "shared")).toBe("");
   });
 
   it("creates a branch from HEAD and carries uncommitted changes along", async () => {
