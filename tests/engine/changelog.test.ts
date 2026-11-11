@@ -157,9 +157,15 @@ describe("versionFromTag edge cases", () => {
     expect(versionFromTag(tag ?? "", "pkg")).toBe(version);
   });
 
-  it("reads tags with an underscore prefix", () => {
+  it("reads a tag whose underscore prefix names the package", () => {
     expect(versionFromTag("oxlint_v1.93.0", "oxlint")).toBe("1.93.0");
-    expect(versionFromTag("apps_v1.93.0", "oxlint")).toBe("1.93.0");
+    expect(versionFromTag("oxfmt_v0.78.0", "oxfmt")).toBe("0.78.0");
+  });
+
+  it("ignores a tag whose underscore prefix names another package", () => {
+    expect(versionFromTag("oxlint_v1.93.0", "oxfmt")).toBeUndefined();
+    expect(versionFromTag("crates_v0.158.0", "oxlint")).toBeUndefined();
+    expect(versionFromTag("apps_v1.84.0", "oxlint")).toBeUndefined();
   });
 
   it("matches scoped monorepo tags exactly", () => {
@@ -189,33 +195,59 @@ describe("releasesBetween edge cases", () => {
     ).toEqual(["1.1.0"]);
   });
 
-  describe("one release for several packages (oxc)", () => {
+  describe("oxc releases", () => {
     const body = [
-      "# Oxlint",
-      "### 🚀 Features",
-      "- 6195265 linter/promise/prefer-catch: Implement suggestion (#28919)",
+      "## Table of Contents",
       "",
-      "# Oxfmt",
+      "- [Oxlint v1.84.0](#oxlint-v1.84.0)",
+      "- [Oxfmt v0.69.0](#oxfmt-v0.69.0)",
+      "",
+      "## Oxlint v1.84.0",
+      "### 🚀 Features",
+      "",
+      "- 2300898 linter/unicorn/no-unreadable-iife: Implement suggestion (#26658) (Mikhail Baev)",
+      "",
+      "## Oxfmt v0.69.0",
       "### 🐛 Bug Fixes",
-      "- 1a2b3c4 formatter: Keep comments in JSX (#29010)",
+      "",
+      "- 1a2b3c4 formatter: Keep comments in JSX (#26700) (leaysgur)",
     ].join("\n");
     const releases = [
-      release("apps_v1.93.0", { name: "oxlint v1.93.0 & oxfmt v0.78.0", body }),
-      release("apps_v1.92.0", { name: "oxlint v1.92.0 & oxfmt v0.77.0" }),
+      release("oxlint_v1.85.0", { name: "oxlint v1.85.0", body: "### 🚀 Features\n\n- lint only" }),
+      release("oxfmt_v0.70.0", { name: "oxfmt v0.70.0", body: "### 🚀 Features\n\n- fmt only" }),
+      release("crates_v0.151.0", { name: "oxc crates_v0.151.0" }),
+      release("apps_v1.84.0", { name: "oxlint v1.84.0 & oxfmt v0.69.0", body }),
+      release("crates_v0.150.0", { name: "oxc crates_v0.150.0" }),
+      release("apps_v1.83.0", { name: "oxlint v1.83.0 & oxfmt v0.68.0" }),
     ];
 
-    it("takes each package's version from the release name", () => {
-      expect(releasesBetween(releases, "oxlint", "1.92.0", "1.93.0").map((e) => e.version)).toEqual(["1.93.0"]);
-      expect(releasesBetween(releases, "oxfmt", "0.77.0", "0.78.0").map((e) => e.version)).toEqual(["0.78.0"]);
+    it("reads per-package and shared releases", () => {
+      expect(releasesBetween(releases, "oxlint", "1.83.0", "1.85.0").map((e) => e.version)).toEqual([
+        "1.84.0",
+        "1.85.0",
+      ]);
+      expect(releasesBetween(releases, "oxfmt", "0.68.0", "0.70.0").map((e) => e.version)).toEqual([
+        "0.69.0",
+        "0.70.0",
+      ]);
+    });
+
+    it("never reads the crates releases as a package version", () => {
+      expect(releasesBetween(releases, "oxfmt", undefined, "0.200.0").map((e) => e.version)).toEqual([
+        "0.68.0",
+        "0.69.0",
+        "0.70.0",
+      ]);
     });
 
     it("keeps only the package's own section of the notes", () => {
-      const [oxlint] = releasesBetween(releases, "oxlint", "1.92.0", "1.93.0");
-      expect(oxlint?.body).toContain("prefer-catch");
+      const [oxlint] = releasesBetween(releases, "oxlint", "1.83.0", "1.84.0");
+      expect(oxlint?.body).toContain("no-unreadable-iife");
       expect(oxlint?.body).not.toContain("Keep comments");
-      const [oxfmt] = releasesBetween(releases, "oxfmt", "0.77.0", "0.78.0");
+      expect(oxlint?.body).not.toContain("Table of Contents");
+      const [oxfmt] = releasesBetween(releases, "oxfmt", "0.68.0", "0.69.0");
       expect(oxfmt?.body).toContain("Keep comments");
-      expect(oxfmt?.body).not.toContain("prefer-catch");
+      expect(oxfmt?.body).not.toContain("no-unreadable-iife");
     });
   });
 

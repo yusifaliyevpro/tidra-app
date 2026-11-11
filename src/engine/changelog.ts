@@ -46,7 +46,13 @@ export function versionFromTag(tag: string, packageName: string): string | undef
     if (tag.slice(0, at) !== packageName) return undefined;
     return semver.valid(semver.clean(tag.slice(at + 1)) ?? "") ?? undefined;
   }
-  return semver.valid(semver.clean(tag.replace(/^[a-z_-]*?(?=v?\d)/i, "")) ?? "") ?? undefined;
+  // `oxlint_v1.2.3` names its package; a repo's other tags (`crates_v0.158.0`) aren't this package's versions.
+  const underscore = /^([\w-]+?)_(v?\d.*)$/i.exec(tag);
+  if (underscore) {
+    if (underscore[1]?.toLowerCase() !== packageName.replace(/^@[^/]+\//, "").toLowerCase()) return undefined;
+    return semver.valid(semver.clean(underscore[2] ?? "") ?? "") ?? undefined;
+  }
+  return semver.valid(semver.clean(tag.replace(/^[a-z-]*?(?=v?\d)/i, "")) ?? "") ?? undefined;
 }
 
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -58,10 +64,10 @@ export function releaseVersion(release: Pick<Release, "tag" | "name">, packageNa
   return (version && semver.valid(version)) || versionFromTag(release.tag, packageName);
 }
 
-/** The package's own part of notes that cover several (`# Oxlint` … `# Oxfmt` …); the whole body otherwise. */
+/** The package's own part of notes that cover several (`## Oxlint v1.84.0` … `## Oxfmt v0.69.0` …); the whole body otherwise. */
 export function packageSection(body: string, packageName: string): string {
   const lines = body.split(/\r?\n/);
-  const heading = new RegExp(`^(#{1,6})\\s+${escapeRegExp(packageName)}\\s*$`, "i");
+  const heading = new RegExp(`^(#{1,6})\\s+${escapeRegExp(packageName)}(?:\\s+v?\\d\\S*)?\\s*$`, "i");
   const start = lines.findIndex((line) => heading.test(line.trim()));
   if (start < 0) return body;
   const level = heading.exec(lines[start]?.trim() ?? "")?.[1]?.length ?? 1;
