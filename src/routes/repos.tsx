@@ -2,13 +2,12 @@ import { useMutation } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import * as z from "@zod/mini";
 import { cn } from "cn";
-import { ArrowDown, ArrowUp, ChevronRight, Download, GitFork, MoreHorizontal } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronRight, GitFork, MoreHorizontal, RefreshCw } from "lucide-react";
 import { Fragment, useState } from "react";
 import { useActions, useCi, useFreshGit, useRepos } from "@/app/queries";
 import { useServices } from "@/app/services";
 import { inTauri } from "@/core/native";
 import type { GitStatus } from "@/engine/git";
-import { createLimit } from "@/engine/limit";
 import { runFailed } from "@/integrations/github";
 import { BranchActions } from "@/modules/projects/branch-actions";
 import { BranchMenu } from "@/modules/projects/branch-menu";
@@ -19,6 +18,7 @@ import { CiCell, CiRuns } from "@/modules/repos/ci-runs";
 import type { ActionsReport } from "@/services/actions";
 import { latestRun } from "@/services/ci-status";
 import type { CiEntry } from "@/services/github-feed";
+import { refreshRepos } from "@/services/repo-refresh";
 import { runRepoAction, type RepoGroup } from "@/services/repos";
 import { Button } from "@/ui/button";
 import { ErrorBoundary } from "@/ui/error-boundary";
@@ -26,7 +26,7 @@ import { openExternal, openFolder, openInVsCode } from "@/ui/external";
 import { Chip, Empty, Page } from "@/ui/layout";
 import { MenuItem, MenuSeparator, Popover } from "@/ui/popover";
 import { tableColumns } from "@/ui/table-columns";
-import { toast, toastError } from "@/ui/toast";
+import { toastError } from "@/ui/toast";
 
 const FILTERS = ["all", "changes", "unpushed", "behind", "ci", "actions"] as const;
 type Filter = (typeof FILTERS)[number];
@@ -94,11 +94,12 @@ function Repos() {
     ];
   });
   const visible = rows.filter(matches[filter]);
-  const fetchAll = useMutation({
-    mutationFn: async () => {
-      const limit = createLimit(4);
-      await Promise.all(rows.map((r) => limit(() => runRepoAction(svc, r.repo, "fetch").catch(() => undefined))));
-    },
+  const refreshAll = useMutation({
+    mutationFn: () =>
+      refreshRepos(
+        svc,
+        rows.map((r) => r.repo),
+      ),
     onError: toastError,
   });
   const set = (patch: Partial<typeof search>) => void navigate({ search: { ...search, ...patch }, replace: true });
@@ -109,11 +110,11 @@ function Repos() {
       actions={
         <Button
           size="sm"
-          icon={<Download className="size-3.5" />}
-          loading={fetchAll.isPending}
-          onClick={() => fetchAll.mutate()}
+          icon={<RefreshCw className="size-3.5" />}
+          loading={refreshAll.isPending}
+          onClick={() => refreshAll.mutate()}
         >
-          Fetch all
+          Refresh all
         </Button>
       }
       toolbar={
@@ -210,9 +211,10 @@ function RepoRow({
   const { repo, git } = row;
   const first = repo.projects[0];
   const pull = useMutation({
-    mutationFn: (kind: "pull" | "push" | "fetch") => runRepoAction(svc, repo, kind),
+    mutationFn: (kind: "pull" | "push") => runRepoAction(svc, repo, kind),
     onError: toastError,
   });
+  const refresh = useMutation({ mutationFn: () => refreshRepos(svc, [repo]), onError: toastError });
   return (
     <div
       className={cn(
@@ -300,9 +302,7 @@ function RepoRow({
             return (
               <>
                 <MenuItem onSelect={act(onBranches)}>Branches…</MenuItem>
-                <MenuItem onSelect={act(() => pull.mutate("fetch", { onSuccess: (message) => toast(message) }))}>
-                  Fetch
-                </MenuItem>
+                <MenuItem onSelect={act(() => refresh.mutate())}>Refresh</MenuItem>
                 {git.behind > 0 ? <MenuItem onSelect={act(() => pull.mutate("pull"))}>Pull</MenuItem> : null}
                 {repo.report?.fork ? (
                   <MenuItem onSelect={act(() => openExternal(`https://${repo.report?.fork?.remote}`))}>
