@@ -213,7 +213,7 @@ async function commitWorkflows(
 
 /**
  * Sets a tool version input (setup-node's `node-version`, pnpm's `version`) wherever the same action sets it to the
- * same value in that workflow file, and commits it on the Actions branch like an action update.
+ * same value in that workflow file, and commits it on the current branch: the user picks the branch beforehand.
  */
 export async function setToolVersion(
   svc: Services,
@@ -225,18 +225,21 @@ export async function setToolVersion(
   const next = value.trim();
   if (!next) throw new Error(`Enter a ${input.tool} version.`);
   if (next === input.value) throw new Error(`${input.tool} is already ${next} in this workflow.`);
-  const { repo, root, git, branch, undo } = await openActionsBranch(svc, repoKey);
-  const path = join(root, item.file);
+  const repo = (await listRepos(svc)).find((r) => r.key === repoKey);
+  if (!repo?.root) throw new Error("This repository has no folder on this device.");
+  const git = createGit(svc.io, repo.root);
+  const path = join(repo.root, item.file);
   const text = await svc.io.readText(path);
-  // The base branch can differ from what was scanned, so inputs are matched by action, name and value.
+  // The file can differ from what was scanned, so inputs are matched by action, name and value.
   const lines = (text === null ? [] : parseWorkflowUses(text))
     .filter((use) => use.action === item.action)
     .flatMap((use) => use.inputs ?? [])
     .filter((found) => found.name === input.name && found.value === input.value)
     .map((found) => found.line);
   if (text === null || lines.length === 0) {
-    await undo();
-    throw new Error(`${item.file} no longer sets ${input.tool} ${input.value} on the default branch.`);
+    throw new Error(
+      `${item.file} no longer sets ${input.tool} ${input.value}. Check again to see its current version.`,
+    );
   }
   await svc.io.writeText(
     path,
@@ -244,7 +247,14 @@ export async function setToolVersion(
   );
   const message = `ci: use ${input.tool} ${next}`;
   await commitWorkflows(svc, repo, git, [item.file], message);
-  return { message, branch };
+  return { message, branch: (await git.status()).branch ?? "HEAD" };
+}
+
+/** Another branch or pulled commits can bring other workflows: rescans the repos these packages live in. */
+export async function rescanActionsOf(svc: Services, projectIds: string[]) {
+  const repos = (await listRepos(svc)).filter((repo) => repo.projects.some((p) => projectIds.includes(p.id)));
+  await Promise.all(repos.map((repo) => scanActions(svc, repo)));
+  svc.invalidate(["actions"]);
 }
 
 export async function scanAllActions(svc: Services, signal?: AbortSignal) {

@@ -259,6 +259,8 @@ export async function writeGitState(svc: Services, root: string, projectIds: str
 export function refreshInBackground(svc: Services, projectIds: string[]) {
   const gitCache: GitInfoCache = new Map();
   void Promise.all(projectIds.map((id) => refreshProject(svc, id, { gitCache }))).catch(() => undefined);
+  // Loaded on use: actions.ts imports this module.
+  void import("./actions").then(({ rescanActionsOf }) => rescanActionsOf(svc, projectIds)).catch(() => undefined);
 }
 
 export interface Checkout {

@@ -111,7 +111,7 @@ export function ActionsList({ repo, report }: { repo: RepoGroup; report: Actions
   );
 }
 
-/** The tool version a setup step pins (`node-version: 24`); a plain value edits in place and commits like an update. */
+/** The tool version a setup step pins (`node-version: 24`); a plain value edits in place and commits on the current branch. */
 function ToolVersion({ repoKey, item, input }: { repoKey: string; item: ActionItem; input: ToolInput }) {
   const svc = useServices();
   const [draft, setDraft] = useState<string | undefined>(undefined);
