@@ -4,10 +4,10 @@ import {
   parseChangelogMarkdown,
   rawFileUrls,
   releasesBetween,
+  releaseVersion,
   repoOf,
   sectionsBetween,
   tagPackage,
-  versionFromTag,
   type ChangelogEntry,
   type Release,
   type RepoRef,
@@ -61,7 +61,7 @@ async function releasesCovering(
     const oldest = from ?? to;
     if (
       batch.some((release) => {
-        const version = versionFromTag(release.tag, name);
+        const version = releaseVersion(release, name);
         return version !== undefined && semver.lte(version, oldest);
       })
     )

@@ -157,6 +157,17 @@ describe("versionFromTag edge cases", () => {
     expect(versionFromTag(tag ?? "", "pkg")).toBe(version);
   });
 
+  it("reads a tag whose underscore prefix names the package", () => {
+    expect(versionFromTag("oxlint_v1.93.0", "oxlint")).toBe("1.93.0");
+    expect(versionFromTag("oxfmt_v0.78.0", "oxfmt")).toBe("0.78.0");
+  });
+
+  it("ignores a tag whose underscore prefix names another package", () => {
+    expect(versionFromTag("oxlint_v1.93.0", "oxfmt")).toBeUndefined();
+    expect(versionFromTag("crates_v0.158.0", "oxlint")).toBeUndefined();
+    expect(versionFromTag("apps_v1.84.0", "oxlint")).toBeUndefined();
+  });
+
   it("matches scoped monorepo tags exactly", () => {
     expect(versionFromTag("@scope/pkg@1.0.0", "@scope/pkg")).toBe("1.0.0");
     expect(versionFromTag("@scope/pkg-extra@1.0.0", "@scope/pkg")).toBeUndefined();
@@ -182,6 +193,62 @@ describe("releasesBetween edge cases", () => {
     expect(
       releasesBetween([release("v1.1.0-rc.1"), release("v1.1.0")], "pkg", "1.0.0", "1.1.0").map((e) => e.version),
     ).toEqual(["1.1.0"]);
+  });
+
+  describe("oxc releases", () => {
+    const body = [
+      "## Table of Contents",
+      "",
+      "- [Oxlint v1.84.0](#oxlint-v1.84.0)",
+      "- [Oxfmt v0.69.0](#oxfmt-v0.69.0)",
+      "",
+      "## Oxlint v1.84.0",
+      "### 🚀 Features",
+      "",
+      "- 2300898 linter/unicorn/no-unreadable-iife: Implement suggestion (#26658) (Mikhail Baev)",
+      "",
+      "## Oxfmt v0.69.0",
+      "### 🐛 Bug Fixes",
+      "",
+      "- 1a2b3c4 formatter: Keep comments in JSX (#26700) (leaysgur)",
+    ].join("\n");
+    const releases = [
+      release("oxlint_v1.85.0", { name: "oxlint v1.85.0", body: "### 🚀 Features\n\n- lint only" }),
+      release("oxfmt_v0.70.0", { name: "oxfmt v0.70.0", body: "### 🚀 Features\n\n- fmt only" }),
+      release("crates_v0.151.0", { name: "oxc crates_v0.151.0" }),
+      release("apps_v1.84.0", { name: "oxlint v1.84.0 & oxfmt v0.69.0", body }),
+      release("crates_v0.150.0", { name: "oxc crates_v0.150.0" }),
+      release("apps_v1.83.0", { name: "oxlint v1.83.0 & oxfmt v0.68.0" }),
+    ];
+
+    it("reads per-package and shared releases", () => {
+      expect(releasesBetween(releases, "oxlint", "1.83.0", "1.85.0").map((e) => e.version)).toEqual([
+        "1.84.0",
+        "1.85.0",
+      ]);
+      expect(releasesBetween(releases, "oxfmt", "0.68.0", "0.70.0").map((e) => e.version)).toEqual([
+        "0.69.0",
+        "0.70.0",
+      ]);
+    });
+
+    it("never reads the crates releases as a package version", () => {
+      expect(releasesBetween(releases, "oxfmt", undefined, "0.200.0").map((e) => e.version)).toEqual([
+        "0.68.0",
+        "0.69.0",
+        "0.70.0",
+      ]);
+    });
+
+    it("keeps only the package's own section of the notes", () => {
+      const [oxlint] = releasesBetween(releases, "oxlint", "1.83.0", "1.84.0");
+      expect(oxlint?.body).toContain("no-unreadable-iife");
+      expect(oxlint?.body).not.toContain("Keep comments");
+      expect(oxlint?.body).not.toContain("Table of Contents");
+      const [oxfmt] = releasesBetween(releases, "oxfmt", "0.68.0", "0.69.0");
+      expect(oxfmt?.body).toContain("Keep comments");
+      expect(oxfmt?.body).not.toContain("no-unreadable-iife");
+    });
   });
 
   it("flags 0.x minor releases as breaking", () => {

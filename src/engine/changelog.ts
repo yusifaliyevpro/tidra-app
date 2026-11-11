@@ -46,7 +46,34 @@ export function versionFromTag(tag: string, packageName: string): string | undef
     if (tag.slice(0, at) !== packageName) return undefined;
     return semver.valid(semver.clean(tag.slice(at + 1)) ?? "") ?? undefined;
   }
+  // `oxlint_v1.2.3` names its package; a repo's other tags (`crates_v0.158.0`) aren't this package's versions.
+  const underscore = /^([\w-]+?)_(v?\d.*)$/i.exec(tag);
+  if (underscore) {
+    if (underscore[1]?.toLowerCase() !== packageName.replace(/^@[^/]+\//, "").toLowerCase()) return undefined;
+    return semver.valid(semver.clean(underscore[2] ?? "") ?? "") ?? undefined;
+  }
   return semver.valid(semver.clean(tag.replace(/^[a-z-]*?(?=v?\d)/i, "")) ?? "") ?? undefined;
+}
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** A release shared by several packages names each version (`oxlint v1.93.0 & oxfmt v0.78.0`); else the tag decides. */
+export function releaseVersion(release: Pick<Release, "tag" | "name">, packageName: string): string | undefined {
+  const named = new RegExp(`(?:^|[\\s,&(])${escapeRegExp(packageName)}\\s+v?(\\d+\\.\\d+\\.\\d+(?:-[\\w.]+)?)`, "i");
+  const version = named.exec(release.name)?.[1];
+  return (version && semver.valid(version)) || versionFromTag(release.tag, packageName);
+}
+
+/** The package's own part of notes that cover several (`## Oxlint v1.84.0` … `## Oxfmt v0.69.0` …); the whole body otherwise. */
+export function packageSection(body: string, packageName: string): string {
+  const lines = body.split(/\r?\n/);
+  const heading = new RegExp(`^(#{1,6})\\s+${escapeRegExp(packageName)}(?:\\s+v?\\d\\S*)?\\s*$`, "i");
+  const start = lines.findIndex((line) => heading.test(line.trim()));
+  if (start < 0) return body;
+  const level = heading.exec(lines[start]?.trim() ?? "")?.[1]?.length ?? 1;
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => (/^(#{1,6})\s/.exec(line)?.[1]?.length ?? 7) <= level);
+  return (end < 0 ? rest : rest.slice(0, end)).join("\n").trim();
 }
 
 /** Package a monorepo tag belongs to (`@expo/cli@58.1.18` → `@expo/cli`); undefined for plain `v1.2.3` tags. */
@@ -76,16 +103,17 @@ export function releasesBetween(
   const entries: ChangelogEntry[] = [];
   for (const release of releases) {
     if (release.draft) continue;
-    const version = versionFromTag(release.tag, packageName);
+    const version = releaseVersion(release, packageName);
     if (!version || (release.prerelease && !includePre) || (semver.prerelease(version) && !includePre)) continue;
     if (semver.gt(version, to) || (from && semver.lte(version, from))) continue;
+    const body = packageSection(release.body, packageName);
     entries.push({
       version,
       title: release.name || release.tag,
-      body: release.body,
+      body,
       publishedAt: release.publishedAt,
       url: release.url,
-      breaking: breakingBump(from, version) || isBreaking(release.body),
+      breaking: breakingBump(from, version) || isBreaking(body),
     });
   }
   return entries.toSorted((a, b) => semver.compare(a.version, b.version));
