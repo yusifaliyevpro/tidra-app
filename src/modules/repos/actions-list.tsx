@@ -159,7 +159,8 @@ function ToolVersion({ repoKey, item, input }: { repoKey: string; item: ActionIt
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => !save.isPending && setDraft(undefined)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && draft.trim()) save.mutate(draft);
+          if (e.key === "Enter" && draft.trim() === input.value) setDraft(undefined);
+          else if (e.key === "Enter" && draft.trim()) save.mutate(draft);
           if (e.key === "Escape") {
             e.stopPropagation();
             setDraft(undefined);
