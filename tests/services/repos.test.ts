@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import { projectPaths } from "@/core/db/schema";
 import { SECRET_KEYS } from "@/core/secrets";
 import type { RunResult } from "@/engine/io";
+import { readCi, refreshCi } from "@/services/github-feed";
 import { fetchProject, readReport, refreshProject, reportKey } from "@/services/projects";
+import { refreshRepos } from "@/services/repo-refresh";
 import { listBranches, listRepos, runRepoAction, switchBranch, syncRepo } from "@/services/repos";
 import { writeSnapshot } from "@/services/snapshot";
 import { jsonResponse, memoryIo, ok } from "../support/memory-io";
@@ -201,6 +203,83 @@ describe("runRepoAction", () => {
     const { svc, close, group } = await repoFixture();
     await expect(runRepoAction(svc, { ...group, root: undefined }, "pull")).rejects.toThrow("no folder on this device");
     close();
+  });
+});
+
+const ghRepo = (fullName: string) =>
+  jsonResponse({
+    full_name: fullName,
+    default_branch: "main",
+    stargazers_count: 0,
+    open_issues_count: 0,
+    html_url: "u",
+  });
+
+/** Two GitHub repos whose CI turns from passing to failing between two reads. */
+async function twoReposWithCi() {
+  let conclusion = "success";
+  const ciRequests: string[] = [];
+  const io = memoryIo(
+    { "/code/app/package.json": "{}", "/code/lib/package.json": "{}" },
+    {
+      run: git,
+      fetch: async (input, init) => {
+        const url = new Request(input, init).url;
+        const repo = /\/repos\/(me\/\w+)/.exec(url)?.[1] ?? "";
+        if (url.endsWith(`/repos/${repo}`)) return ghRepo(repo);
+        if (url.includes("/pulls")) return jsonResponse([]);
+        ciRequests.push(repo);
+        return jsonResponse({
+          workflow_runs: [
+            {
+              id: 1,
+              name: "CI",
+              head_branch: "main",
+              status: "completed",
+              conclusion,
+              event: "push",
+              html_url: "u",
+              created_at: "2026-11-01T00:00:00Z",
+              run_number: 1,
+            },
+          ],
+        });
+      },
+    },
+  );
+  const { svc, close } = await testServices(io);
+  await svc.setSecret(SECRET_KEYS.github, "ghp_test");
+  await svc.store.addProject({ id: "a", name: "app", remote: "github.com/me/app", path: "/code/app" });
+  await svc.store.addProject({ id: "l", name: "lib", remote: "github.com/me/lib", path: "/code/lib" });
+  await refreshCi(svc);
+  conclusion = "failure";
+  ciRequests.length = 0;
+  const conclusions = async () =>
+    Object.fromEntries((await readCi(svc))?.entries.map((e) => [e.repo, e.runs[0]?.conclusion]) ?? []);
+  return { io, svc, close, ciRequests, conclusions, repos: await listRepos(svc) };
+}
+
+describe("refreshRepos", () => {
+  it("fetches every repo and refreshes their CI", async () => {
+    const { io, svc, close, conclusions, repos } = await twoReposWithCi();
+    await refreshRepos(svc, repos);
+    const fetched = io.runs.filter((r) => r.args[0] === "fetch").map((r) => r.cwd);
+    const ci = await conclusions();
+    close();
+    expect(fetched).toEqual(expect.arrayContaining(["/code/app", "/code/lib"]));
+    expect(fetched).toHaveLength(2);
+    expect(ci).toEqual({ "me/app": "failure", "me/lib": "failure" });
+  });
+
+  it("refreshes only one repo's CI and keeps the others as they were", async () => {
+    const { svc, close, ciRequests, conclusions, repos } = await twoReposWithCi();
+    const app = repos.find((r) => r.github === "me/app");
+    if (!app) throw new Error("no app repo");
+    await refreshRepos(svc, [app]);
+    const ci = await conclusions();
+    close();
+    expect(ciRequests).toEqual(["me/app"]);
+    expect(ci).toEqual({ "me/app": "failure", "me/lib": "success" });
   });
 });
 

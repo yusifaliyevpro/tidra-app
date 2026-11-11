@@ -136,10 +136,15 @@ export function currentRuns(runs: WorkflowRun[], defaultBranch: string | undefin
   });
 }
 
-export async function refreshCi(svc: Services): Promise<CiSnapshot> {
+/** Refreshes CI for every repo, or only the `owner/repo`s in `only`, keeping the other repos' last entries. */
+export async function refreshCi(svc: Services, only?: Set<string>): Promise<CiSnapshot> {
   const github = await svc.github();
+  const [targets, previous] = await Promise.all([projectRepos(svc), only ? readCi(svc) : undefined]);
+  const kept = new Map((previous?.entries ?? []).map((entry) => [entry.repo, entry]));
   const entries = await Promise.all(
-    (await projectRepos(svc)).map(async (target): Promise<CiEntry> => {
+    targets.map(async (target): Promise<CiEntry> => {
+      const last = kept.get(target.repo);
+      if (only && !only.has(target.repo) && last) return last;
       try {
         const [owner = "", name = ""] = target.repo.split("/");
         const [repo, pulls, runs] = await Promise.all([
