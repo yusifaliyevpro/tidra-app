@@ -220,10 +220,11 @@ describe("scanActions after a failed lookup", () => {
   });
 });
 
+const setup = (version: string) =>
+  `jobs:\n  ci:\n    steps:\n      - uses: actions/setup-node@v7\n        with:\n          node-version: ${version}\n`;
+
 describe("Actions after a branch switch", () => {
   it("rereads the workflows the other branch has", async () => {
-    const setup = (version: string) =>
-      `jobs:\n  ci:\n    steps:\n      - uses: actions/setup-node@v7\n        with:\n          node-version: ${version}\n`;
     const { io, svc, close } = await withWorkflow(setup("26"));
     await scanActions(svc, { key: "github.com/me/web", root: "/code/web" });
     io.files.set("/code/web/.github/workflows/ci.yml", setup("24"));

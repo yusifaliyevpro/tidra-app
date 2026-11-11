@@ -253,10 +253,11 @@ export async function setToolVersion(
 /** Another branch or pulled commits can bring other workflows: rescans the repos these packages live in. */
 export async function rescanActionsOf(svc: Services, projectIds: string[]) {
   // From the project list, not listRepos: that reads every report, and this runs on each branch switch.
+  const wanted = new Set(projectIds);
   const roots = new Map<string, string>();
   for (const project of await svc.store.listProjects()) {
     const root = checkoutRoot(project);
-    if (root && projectIds.includes(project.id)) roots.set(project.remote ?? root, root);
+    if (root && wanted.has(project.id)) roots.set(project.remote ?? root, root);
   }
   await Promise.all([...roots].map(([key, root]) => scanActions(svc, { key, root })));
   svc.invalidate(["actions"]);

@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import * as z from "@zod/mini";
 import { cn } from "cn";
-import { ArrowDown, ArrowUp, ChevronRight, GitFork, MoreHorizontal, RefreshCw } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronRight, FolderOpen, GitFork, RefreshCw } from "lucide-react";
 import { Fragment, useState } from "react";
 import { useActions, useCi, useFreshGit, useRepos } from "@/app/queries";
 import { useServices } from "@/app/services";
@@ -20,13 +20,14 @@ import { latestRun } from "@/services/ci-status";
 import type { CiEntry } from "@/services/github-feed";
 import { refreshRepos } from "@/services/repo-refresh";
 import { runRepoAction, type RepoGroup } from "@/services/repos";
-import { Button } from "@/ui/button";
+import { Button, IconButton } from "@/ui/button";
 import { ErrorBoundary } from "@/ui/error-boundary";
 import { openExternal, openFolder, openInVsCode } from "@/ui/external";
 import { Chip, Empty, Page } from "@/ui/layout";
-import { MenuItem, MenuSeparator, Popover } from "@/ui/popover";
+import { ContextMenu, MenuItem, MenuSeparator } from "@/ui/popover";
 import { tableColumns } from "@/ui/table-columns";
 import { toastError } from "@/ui/toast";
+import { VsCodeIcon } from "@/ui/vscode-icon";
 
 const FILTERS = ["all", "changes", "unpushed", "behind", "ci", "actions"] as const;
 type Filter = (typeof FILTERS)[number];
@@ -215,8 +216,13 @@ function RepoRow({
     onError: toastError,
   });
   const refresh = useMutation({ mutationFn: () => refreshRepos(svc, [repo]), onError: toastError });
+  const [menu, setMenu] = useState<{ x: number; y: number }>();
   return (
     <div
+      onContextMenu={(event) => {
+        event.preventDefault();
+        setMenu({ x: event.clientX, y: event.clientY });
+      }}
       className={cn(
         COLS,
         "group h-10 border-b border-line px-5 transition-colors duration-[80ms] hover:bg-hover",
@@ -280,51 +286,102 @@ function RepoRow({
             <SyncButton projectId={first.id} git={git} fork={repo.report?.fork} />
           </>
         ) : null}
-        <Popover
-          align="end"
-          className="w-56 p-1"
-          renderTrigger={({ toggle }) => (
-            <button
-              type="button"
-              aria-label={`More for ${repo.label}`}
-              onClick={toggle}
-              className="flex size-6 items-center justify-center rounded-md text-muted hover:bg-hover hover:text-fg"
-            >
-              <MoreHorizontal className="size-4" />
-            </button>
-          )}
-        >
-          {(close) => {
-            const act = (fn: () => void) => () => {
-              close();
-              fn();
-            };
-            return (
-              <>
-                <MenuItem onSelect={act(onBranches)}>Branches…</MenuItem>
-                <MenuItem onSelect={act(() => refresh.mutate())}>Refresh</MenuItem>
-                {git.behind > 0 ? <MenuItem onSelect={act(() => pull.mutate("pull"))}>Pull</MenuItem> : null}
-                {repo.report?.fork ? (
-                  <MenuItem onSelect={act(() => openExternal(`https://${repo.report?.fork?.remote}`))}>
-                    <GitFork className="size-4" />
-                    Open upstream
-                  </MenuItem>
-                ) : null}
-                {repo.root ? (
-                  <>
-                    <MenuSeparator />
-                    <MenuItem onSelect={act(() => openInVsCode(svc.io, repo.root ?? ""))}>Open in VS Code</MenuItem>
-                    {inTauri ? (
-                      <MenuItem onSelect={act(() => openFolder(repo.root ?? ""))}>Open folder</MenuItem>
-                    ) : null}
-                  </>
-                ) : null}
-              </>
-            );
-          }}
-        </Popover>
+        <HoverTools root={repo.root} refreshing={refresh.isPending} onRefresh={() => refresh.mutate()} />
       </span>
+      <ContextMenu at={menu} onClose={() => setMenu(undefined)}>
+        <RepoMenuItems
+          repo={repo}
+          behind={git.behind}
+          onBranches={onBranches}
+          onRefresh={() => refresh.mutate()}
+          onPull={() => pull.mutate("pull")}
+          onClose={() => setMenu(undefined)}
+        />
+      </ContextMenu>
     </div>
+  );
+}
+
+/** Shown while the pointer or focus is on the row. */
+function HoverTools({
+  root,
+  refreshing,
+  onRefresh,
+}: {
+  root: string | undefined;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
+  const svc = useServices();
+  return (
+    <span className="flex items-center gap-0.5 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
+      <IconButton
+        size="sm"
+        label="Refresh"
+        loading={refreshing}
+        icon={<RefreshCw className="size-3.5" />}
+        onClick={onRefresh}
+      />
+      {root && inTauri ? (
+        <IconButton
+          size="sm"
+          label="Open folder"
+          icon={<FolderOpen className="size-3.5" />}
+          onClick={() => openFolder(root)}
+        />
+      ) : null}
+      {root ? (
+        <IconButton
+          size="sm"
+          label="Open in VS Code"
+          icon={<VsCodeIcon className="size-3.5" />}
+          onClick={() => openInVsCode(svc.io, root)}
+        />
+      ) : null}
+    </span>
+  );
+}
+
+/** The row's right-click menu: rarer actions that don't earn a hover button. */
+function RepoMenuItems({
+  repo,
+  behind,
+  onBranches,
+  onRefresh,
+  onPull,
+  onClose,
+}: {
+  repo: RepoGroup;
+  behind: number;
+  onBranches: () => void;
+  onRefresh: () => void;
+  onPull: () => void;
+  onClose: () => void;
+}) {
+  const svc = useServices();
+  const act = (fn: () => void) => () => {
+    onClose();
+    fn();
+  };
+  return (
+    <>
+      <MenuItem onSelect={act(onBranches)}>Branches…</MenuItem>
+      <MenuItem onSelect={act(onRefresh)}>Refresh</MenuItem>
+      {behind > 0 ? <MenuItem onSelect={act(onPull)}>Pull</MenuItem> : null}
+      {repo.report?.fork ? (
+        <MenuItem onSelect={act(() => openExternal(`https://${repo.report?.fork?.remote}`))}>
+          <GitFork className="size-4" />
+          Open upstream
+        </MenuItem>
+      ) : null}
+      {repo.root ? (
+        <>
+          <MenuSeparator />
+          <MenuItem onSelect={act(() => openInVsCode(svc.io, repo.root ?? ""))}>Open in VS Code</MenuItem>
+          {inTauri ? <MenuItem onSelect={act(() => openFolder(repo.root ?? ""))}>Open folder</MenuItem> : null}
+        </>
+      ) : null}
+    </>
   );
 }
 

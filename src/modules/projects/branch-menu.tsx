@@ -1,10 +1,11 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Check, ChevronDown, Cloud, GitBranch, GitBranchPlus, Plus } from "lucide-react";
+import { Check, ChevronDown, Cloud, GitBranch, GitBranchPlus, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useServices } from "@/app/services";
 import type { GitStatus } from "@/engine/git";
-import { listBranches, switchBranch } from "@/services/repos";
+import { deleteBranchEverywhere, listBranches, switchBranch, type BranchEntry } from "@/services/repos";
 import { freshBranchName } from "@/services/updates";
+import { Button } from "@/ui/button";
 import { MenuItem, Popover } from "@/ui/popover";
 import { Spinner } from "@/ui/spinner";
 import { toast, toastError } from "@/ui/toast";
@@ -68,6 +69,13 @@ function BranchList({
     },
     onError: toastError,
   });
+  const [confirming, setConfirming] = useState<BranchEntry>();
+  const remove = useMutation({
+    mutationFn: (name: string) => deleteBranchEverywhere(svc, projectId, name),
+    onSuccess: (message) => toast(message),
+    onError: toastError,
+    onSettled: () => setConfirming(undefined),
+  });
   const query = filter.trim();
   const shown = (branches.data ?? []).filter((b) => b.name.toLowerCase().includes(query.toLowerCase()));
   const canCreate = query && VALID_BRANCH.test(query) && !(branches.data ?? []).some((b) => b.name === query);
@@ -111,24 +119,50 @@ function BranchList({
           </MenuItem>
         ) : null}
         {branches.error ? <p className="px-2 py-2 text-sm text-bad">{branches.error.message}</p> : null}
-        {shown.map((branch) => (
-          <MenuItem
-            key={`${branch.remote}:${branch.name}`}
-            active={branch.name === current}
-            disabled={change.isPending}
-            onSelect={() => pick(branch.name)}
-          >
-            {branch.name === current ? (
-              <Check className="size-3.5 shrink-0 text-accent-text" />
-            ) : branch.remote ? (
-              <Cloud className="size-3.5 shrink-0 text-faint" />
-            ) : (
-              <span className="size-3.5 shrink-0" />
-            )}
-            <span className="truncate font-mono text-sm">{branch.name}</span>
-            {change.isPending && change.variables.name === branch.name ? <Spinner className="ml-auto size-3" /> : null}
-          </MenuItem>
-        ))}
+        {shown.map((branch) =>
+          confirming?.name === branch.name ? (
+            <ConfirmDelete
+              key={`${branch.remote}:${branch.name}`}
+              branch={branch}
+              pending={remove.isPending}
+              onConfirm={() => remove.mutate(branch.name)}
+              onCancel={() => setConfirming(undefined)}
+            />
+          ) : (
+            <div key={`${branch.remote}:${branch.name}`} className="group relative">
+              <MenuItem
+                active={branch.name === current}
+                disabled={change.isPending}
+                onSelect={() => pick(branch.name)}
+                className="pr-8"
+              >
+                {branch.name === current ? (
+                  <Check className="size-3.5 shrink-0 text-accent-text" />
+                ) : branch.remote ? (
+                  <Cloud className="size-3.5 shrink-0 text-faint" />
+                ) : (
+                  <span className="size-3.5 shrink-0" />
+                )}
+                <span className="truncate font-mono text-sm">{branch.name}</span>
+                {change.isPending && change.variables.name === branch.name ? (
+                  <Spinner className="ml-auto size-3" />
+                ) : null}
+              </MenuItem>
+              {branch.name !== current && !branch.isDefault ? (
+                <button
+                  type="button"
+                  aria-label={`Delete ${branch.name}`}
+                  title={`Delete ${branch.name}`}
+                  disabled={remove.isPending}
+                  onClick={() => setConfirming(branch)}
+                  className="absolute top-1/2 right-1 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted opacity-0 group-hover:opacity-100 hover:bg-hover hover:text-bad focus-visible:opacity-100"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              ) : null}
+            </div>
+          ),
+        )}
         {canCreate ? (
           <MenuItem disabled={change.isPending} onSelect={() => pick(query, true)}>
             <Plus className="size-3.5 shrink-0" />
@@ -144,5 +178,35 @@ function BranchList({
         </p>
       ) : null}
     </>
+  );
+}
+
+/** Names where the branch goes, since a copy on origin may back someone's pull request. */
+function ConfirmDelete({
+  branch,
+  pending,
+  onConfirm,
+  onCancel,
+}: {
+  branch: BranchEntry;
+  pending: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const where = branch.remote ? "on origin" : branch.onOrigin ? "here and on origin" : "here";
+  return (
+    <div className="flex flex-col gap-2 rounded-md bg-hover p-2">
+      <p className="text-sm">
+        Delete <span className="font-mono">{branch.name}</span> {where}? Unmerged commits on it are lost.
+      </p>
+      <div className="flex justify-end gap-1.5">
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button size="sm" variant="danger" loading={pending} onClick={onConfirm}>
+          Delete
+        </Button>
+      </div>
+    </div>
   );
 }

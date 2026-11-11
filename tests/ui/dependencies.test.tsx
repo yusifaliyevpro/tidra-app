@@ -113,15 +113,15 @@ describe("Dependencies", () => {
   });
 });
 
-describe("Dependencies waiting for minimumReleaseAge", () => {
-  const waitingTree = (outdated: OutdatedEntry[], waiting: OutdatedEntry[]) => (
-    <QueryClientProvider client={svc.queryClient}>
-      <ServicesProvider value={{ svc, processes: createProcessManager(svc) }}>
-        <Dependencies projectId="p1" report={{ ...projectReport(outdated), waiting }} onStarted={() => undefined} />
-      </ServicesProvider>
-    </QueryClientProvider>
-  );
+const waitingTree = (outdated: OutdatedEntry[], waiting: OutdatedEntry[]) => (
+  <QueryClientProvider client={svc.queryClient}>
+    <ServicesProvider value={{ svc, processes: createProcessManager(svc) }}>
+      <Dependencies projectId="p1" report={{ ...projectReport(outdated), waiting }} onStarted={() => undefined} />
+    </ServicesProvider>
+  </QueryClientProvider>
+);
 
+describe("Dependencies waiting for minimumReleaseAge", () => {
   it("shows waiting updates but never picks them, even with select all", async () => {
     const user = userEvent.setup();
     const young = { ...entry("next-intl", "4.14.10", "4.14.11", "patch"), readyAt: "2999-01-01T00:00:00.000Z" };

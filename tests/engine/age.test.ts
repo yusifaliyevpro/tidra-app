@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shortAge } from "@/ui/time";
+import { shortAge } from "@/engine/age";
 
 const NOW = Date.parse("2026-10-31T12:00:00Z");
 const ago = (ms: number) => new Date(NOW - ms).toISOString();

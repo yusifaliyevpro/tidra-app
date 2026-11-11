@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowRight, Clock } from "lucide-react";
 import { useId, useState } from "react";
 import { useServices } from "@/app/services";
 import { useListKeys } from "@/app/shortcuts";
+import { shortSpan } from "@/engine/age";
 import type { OutdatedEntry } from "@/engine/outdated";
 import type { Bump } from "@/engine/versions";
 import { ChangelogPanel } from "@/modules/changelog-panel";
@@ -13,7 +14,7 @@ import { Button } from "@/ui/button";
 import { Checkbox } from "@/ui/field";
 import { Empty, ErrorNote, Split } from "@/ui/layout";
 import { Mono } from "@/ui/misc";
-import { ReleaseAge, shortSpan } from "@/ui/time";
+import { ReleaseAge } from "@/ui/time";
 import { toastError } from "@/ui/toast";
 
 const ORDER: Bump[] = ["major", "minor", "patch", "prerelease"];
@@ -156,30 +157,7 @@ export function Dependencies({
                   </div>
                 );
               })}
-              {waiting.length > 0 ? (
-                <div>
-                  <div className="sticky top-0 z-10 flex h-8 items-center gap-2.5 border-b border-line bg-canvas px-4 text-sm">
-                    <span className="font-medium text-muted">Waiting for minimumReleaseAge</span>
-                    <span className="ml-auto text-faint tabular">{waiting.length}</span>
-                  </div>
-                  {waiting.map((entry) => {
-                    const key = keyOf(entry);
-                    return (
-                      <DependencyRow
-                        key={key}
-                        rowKey={key}
-                        entry={entry}
-                        target={entry.latest}
-                        picked={false}
-                        waiting
-                        current={currentKey === key}
-                        onToggle={toggle}
-                        onSelect={setSelected}
-                      />
-                    );
-                  })}
-                </div>
-              ) : null}
+              <WaitingGroup entries={waiting} currentKey={currentKey} onSelect={setSelected} />
             </div>
           }
           detail={
@@ -216,6 +194,43 @@ export function Dependencies({
           {chosen.length > 1 ? `Update ${chosen.length} packages` : "Update"}
         </Button>
       </footer>
+    </div>
+  );
+}
+
+/** Updates still too young to install: readable, never pickable. */
+function WaitingGroup({
+  entries,
+  currentKey,
+  onSelect,
+}: {
+  entries: OutdatedEntry[];
+  currentKey: string | undefined;
+  onSelect: (key: string) => void;
+}) {
+  if (entries.length === 0) return null;
+  return (
+    <div>
+      <div className="sticky top-0 z-10 flex h-8 items-center gap-2.5 border-b border-line bg-canvas px-4 text-sm">
+        <span className="font-medium text-muted">Waiting for minimumReleaseAge</span>
+        <span className="ml-auto text-faint tabular">{entries.length}</span>
+      </div>
+      {entries.map((entry) => {
+        const key = keyOf(entry);
+        return (
+          <DependencyRow
+            key={key}
+            rowKey={key}
+            entry={entry}
+            target={entry.latest}
+            picked={false}
+            waiting
+            current={currentKey === key}
+            onToggle={() => undefined}
+            onSelect={onSelect}
+          />
+        );
+      })}
     </div>
   );
 }
