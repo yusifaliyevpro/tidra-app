@@ -1,4 +1,12 @@
-import { applyActionUpdates, currentVersion, nextRef, parseWorkflowUses, type ActionUse } from "@/engine/actions";
+import {
+  applyActionUpdates,
+  currentVersion,
+  nextRef,
+  parseWorkflowUses,
+  setInputValue,
+  type ActionUse,
+  type ToolInput,
+} from "@/engine/actions";
 import { fingerprint } from "@/engine/fingerprint";
 import { createGit } from "@/engine/git";
 import { createLimit } from "@/engine/limit";
@@ -56,7 +64,8 @@ export async function scanActions(
     if (!(await svc.io.exists(dir))) throw new NoWorkflows();
     const files = (await svc.io.readDir(dir)).filter((entry) => !entry.isDir && /\.ya?ml$/.test(entry.name));
     const texts = await Promise.all(files.map((entry) => svc.io.readText(join(dir, entry.name))));
-    hash = await fingerprint(files.flatMap((entry, i) => [entry.name, texts[i]]));
+    // The leading marker retires reports saved before tool versions were read.
+    hash = await fingerprint(["tool-inputs", ...files.flatMap((entry, i) => [entry.name, texts[i]])]);
     const previous = options.force ? undefined : await readActions(svc, repo.key);
     if (
       previous &&
@@ -126,22 +135,7 @@ export async function applyActionUpdatesToRepo(
   repoKey: string,
   items: ActionItem[],
 ): Promise<{ message: string; branch: string }> {
-  const repo = (await listRepos(svc)).find((r) => r.key === repoKey);
-  if (!repo?.root) throw new Error("This repository has no folder on this device.");
-  const root = repo.root;
-  const git = createGit(svc.io, root);
-  const status = await git.status();
-  let branch = status.branch;
-  let created: { name: string; from: string | undefined } | undefined;
-  if (!branch?.startsWith(ACTIONS_BRANCH_PREFIX)) {
-    // origin's copy: the local default branch may be behind.
-    const defaultBranch = await git.defaultBranch();
-    const base = defaultBranch ? `origin/${defaultBranch}` : branch;
-    const name = branchName(new Date(), ACTIONS_BRANCH_PREFIX);
-    await git.run(["switch", "--no-track", "-c", name, ...(base ? [base] : [])]);
-    created = { name, from: status.branch };
-    branch = name;
-  }
+  const { repo, root, git, branch, undo } = await openActionsBranch(svc, repoKey);
 
   // The base branch can differ from what was scanned, so updates are matched by action and ref, not line number.
   const wanted = items.filter((i) => i.next);
@@ -164,24 +158,92 @@ export async function applyActionUpdatesToRepo(
     }),
   );
   if (applied.length === 0) {
-    if (created) {
-      await git.switchTo(created.from ?? "-");
-      await git.deleteBranch(created.name);
-    }
+    await undo();
     throw new Error("These actions are already up to date on the default branch.");
   }
 
   const files = [...new Set(applied.map((i) => i.file))];
-  await git.add(files);
   const names = [...new Set(applied.map((i) => i.action))];
   const message =
     names.length === 1
       ? `ci: bump ${names[0]} to ${applied[0]?.latestTag ?? "latest"}`
       : `ci: bump ${names.length} GitHub Actions`;
+  await commitWorkflows(svc, repo, git, files, message);
+  return { message, branch };
+}
+
+/**
+ * Switches to a `tidra/actions-<date>` branch cut from origin's default branch, or stays on the Actions branch already
+ * checked out. `undo` goes back and deletes the branch when nothing was changed on it.
+ */
+async function openActionsBranch(svc: Services, repoKey: string) {
+  const repo = (await listRepos(svc)).find((r) => r.key === repoKey);
+  if (!repo?.root) throw new Error("This repository has no folder on this device.");
+  const root = repo.root;
+  const git = createGit(svc.io, root);
+  const status = await git.status();
+  if (status.branch?.startsWith(ACTIONS_BRANCH_PREFIX)) {
+    return { repo, root, git, branch: status.branch, undo: async () => {} };
+  }
+  // origin's copy: the local default branch may be behind.
+  const defaultBranch = await git.defaultBranch();
+  const base = defaultBranch ? `origin/${defaultBranch}` : status.branch;
+  const name = branchName(new Date(), ACTIONS_BRANCH_PREFIX);
+  await git.run(["switch", "--no-track", "-c", name, ...(base ? [base] : [])]);
+  const undo = async () => {
+    await git.switchTo(status.branch ?? "-");
+    await git.deleteBranch(name);
+  };
+  return { repo, root, git, branch: name, undo };
+}
+
+async function commitWorkflows(
+  svc: Services,
+  repo: RepoGroup,
+  git: ReturnType<typeof createGit>,
+  files: string[],
+  message: string,
+) {
+  await git.add(files);
   await git.run(["commit", "-m", message, "--", ...files]);
   await scanActions(svc, repo, { force: true });
   await Promise.all(repo.projects.map((p) => refreshProject(svc, p.id)));
   await svc.queryClient.invalidateQueries({ queryKey: ["actions"] });
+}
+
+/**
+ * Sets a tool version input (setup-node's `node-version`, pnpm's `version`) wherever the same action sets it to the
+ * same value in that workflow file, and commits it on the Actions branch like an action update.
+ */
+export async function setToolVersion(
+  svc: Services,
+  repoKey: string,
+  item: Pick<ActionItem, "file" | "action">,
+  input: ToolInput,
+  value: string,
+): Promise<{ message: string; branch: string }> {
+  const next = value.trim();
+  if (!next) throw new Error(`Enter a ${input.tool} version.`);
+  if (next === input.value) throw new Error(`${input.tool} is already ${next} in this workflow.`);
+  const { repo, root, git, branch, undo } = await openActionsBranch(svc, repoKey);
+  const path = join(root, item.file);
+  const text = await svc.io.readText(path);
+  // The base branch can differ from what was scanned, so inputs are matched by action, name and value.
+  const lines = (text === null ? [] : parseWorkflowUses(text))
+    .filter((use) => use.action === item.action)
+    .flatMap((use) => use.inputs ?? [])
+    .filter((found) => found.name === input.name && found.value === input.value)
+    .map((found) => found.line);
+  if (text === null || lines.length === 0) {
+    await undo();
+    throw new Error(`${item.file} no longer sets ${input.tool} ${input.value} on the default branch.`);
+  }
+  await svc.io.writeText(
+    path,
+    lines.reduce((current, line) => setInputValue(current, line, next), text),
+  );
+  const message = `ci: use ${input.tool} ${next}`;
+  await commitWorkflows(svc, repo, git, [item.file], message);
   return { message, branch };
 }
 
