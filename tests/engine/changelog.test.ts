@@ -157,6 +157,11 @@ describe("versionFromTag edge cases", () => {
     expect(versionFromTag(tag ?? "", "pkg")).toBe(version);
   });
 
+  it("reads tags with an underscore prefix", () => {
+    expect(versionFromTag("oxlint_v1.93.0", "oxlint")).toBe("1.93.0");
+    expect(versionFromTag("apps_v1.93.0", "oxlint")).toBe("1.93.0");
+  });
+
   it("matches scoped monorepo tags exactly", () => {
     expect(versionFromTag("@scope/pkg@1.0.0", "@scope/pkg")).toBe("1.0.0");
     expect(versionFromTag("@scope/pkg-extra@1.0.0", "@scope/pkg")).toBeUndefined();
@@ -182,6 +187,36 @@ describe("releasesBetween edge cases", () => {
     expect(
       releasesBetween([release("v1.1.0-rc.1"), release("v1.1.0")], "pkg", "1.0.0", "1.1.0").map((e) => e.version),
     ).toEqual(["1.1.0"]);
+  });
+
+  describe("one release for several packages (oxc)", () => {
+    const body = [
+      "# Oxlint",
+      "### 🚀 Features",
+      "- 6195265 linter/promise/prefer-catch: Implement suggestion (#28919)",
+      "",
+      "# Oxfmt",
+      "### 🐛 Bug Fixes",
+      "- 1a2b3c4 formatter: Keep comments in JSX (#29010)",
+    ].join("\n");
+    const releases = [
+      release("apps_v1.93.0", { name: "oxlint v1.93.0 & oxfmt v0.78.0", body }),
+      release("apps_v1.92.0", { name: "oxlint v1.92.0 & oxfmt v0.77.0" }),
+    ];
+
+    it("takes each package's version from the release name", () => {
+      expect(releasesBetween(releases, "oxlint", "1.92.0", "1.93.0").map((e) => e.version)).toEqual(["1.93.0"]);
+      expect(releasesBetween(releases, "oxfmt", "0.77.0", "0.78.0").map((e) => e.version)).toEqual(["0.78.0"]);
+    });
+
+    it("keeps only the package's own section of the notes", () => {
+      const [oxlint] = releasesBetween(releases, "oxlint", "1.92.0", "1.93.0");
+      expect(oxlint?.body).toContain("prefer-catch");
+      expect(oxlint?.body).not.toContain("Keep comments");
+      const [oxfmt] = releasesBetween(releases, "oxfmt", "0.77.0", "0.78.0");
+      expect(oxfmt?.body).toContain("Keep comments");
+      expect(oxfmt?.body).not.toContain("prefer-catch");
+    });
   });
 
   it("flags 0.x minor releases as breaking", () => {
