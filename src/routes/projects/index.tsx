@@ -9,7 +9,6 @@ import { useServices } from "@/app/services";
 import { useListKeys } from "@/app/shortcuts";
 import { repoLabel } from "@/engine/discover";
 import type { GitStatus } from "@/engine/git";
-import { releaseAgeNote } from "@/engine/outdated";
 import { JobRefresh } from "@/modules/common";
 import { projectLink } from "@/modules/links";
 import { AddProjectsDialog } from "@/modules/projects/add-project";
@@ -32,6 +31,7 @@ import { Mono } from "@/ui/misc";
 import { ContextMenu, MenuItem, MenuSeparator } from "@/ui/popover";
 import { StatusGlyph } from "@/ui/status-glyph";
 import { tableColumns } from "@/ui/table-columns";
+import { ReleaseAge } from "@/ui/time";
 import { toast, toastError } from "@/ui/toast";
 
 const FILTERS = ["all", "updates", "advisories", "changes", "unpushed"] as const;
@@ -730,14 +730,18 @@ function Peek({ row, health, onClose }: { row: Row; health: ProjectHealth | unde
           outdated.map((entry) => (
             <div key={`${entry.name}:${entry.range}`} className="flex h-9 items-center gap-2 border-b border-line px-4">
               <Mono className="min-w-0 flex-1 truncate text-fg">{entry.name}</Mono>
-              {entry.newerThanReleaseAge ? (
-                <span title={releaseAgeNote(entry.newerThanReleaseAge)} className="flex">
-                  <Clock className="size-3.5 text-warn" aria-label={releaseAgeNote(entry.newerThanReleaseAge)} />
+              {entry.heldBackByAge ? (
+                <span title="A newer version is younger than this project's minimumReleaseAge" className="flex">
+                  <Clock
+                    className="size-3.5 text-faint"
+                    aria-label="A newer version is younger than this project's minimumReleaseAge"
+                  />
                 </span>
               ) : null}
               <Mono className="text-faint">{entry.current ?? entry.range}</Mono>
               <span className="text-faint">→</span>
               <Mono className={BUMP_TEXT[entry.bump]}>{entry.latest}</Mono>
+              <ReleaseAge value={entry.publishedAt} />
             </div>
           ))
         )}

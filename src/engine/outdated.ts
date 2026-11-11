@@ -27,23 +27,12 @@ export interface OutdatedEntry {
   deprecated?: string;
   /** Newer versions skipped because they are younger than the project's minimum release age. */
   heldBackByAge: boolean;
-  /** `latest` is younger than the minimum release age, offered anyway because the package is excluded from it. */
-  newerThanReleaseAge?: { publishedAt: string; minAgeMinutes: number };
+  /** When `latest` was published; missing when the registry sent no times. */
+  publishedAt?: string;
+  /** Only on waiting entries: when `latest` becomes old enough to install. */
+  readyAt?: string;
   enginesNode?: string;
   peerDependencies?: Record<string, string>;
-}
-
-const span = (minutes: number) => {
-  if (minutes < 60) return `${Math.max(1, Math.round(minutes))} min`;
-  if (minutes < 1440) return `${Math.round(minutes / 60)} h`;
-  const days = Math.round(minutes / 1440);
-  return days === 1 ? "1 day" : `${days} days`;
-};
-
-/** Tooltip for a version younger than the minimum release age: how old it is against what the project asks for. */
-export function releaseAgeNote(age: { publishedAt: string; minAgeMinutes: number }, now = new Date()): string {
-  const minutes = (now.getTime() - Date.parse(age.publishedAt)) / 60_000;
-  return `Published ${span(minutes)} ago, newer than this project's minimumReleaseAge (${span(age.minAgeMinutes)}). It is excluded from the rule, so Tidra offers it anyway.`;
 }
 
 export interface OutdatedOptions {
@@ -120,7 +109,7 @@ export function pickLatest(
   packument: Packument,
   current: string | undefined,
   options: { pinMajor: boolean; minAgeMinutes: number; now: Date },
-): { version: string | undefined; heldBackByAge: boolean } {
+): { version: string | undefined; heldBackByAge: boolean; newest?: string } {
   const tags = packument["dist-tags"];
   const channel = current ? prereleaseChannel(current) : undefined;
   const newest = tags.latest || sortVersionsDesc(Object.keys(packument.versions))[0];
@@ -152,7 +141,7 @@ export function pickLatest(
       !packument.versions[v]?.deprecated &&
       oldEnough(v),
   );
-  return { version: fallback, heldBackByAge: true };
+  return { version: fallback, heldBackByAge: true, newest: target };
 }
 
 /**
@@ -165,15 +154,28 @@ async function onLatest(registry: RegistryClient, name: string, current: string 
   return latest !== undefined && semver.valid(latest) !== null && semver.gte(current, latest);
 }
 
+export interface OutdatedResult {
+  entries: OutdatedEntry[];
+  /** Updates whose every newer version is still younger than the minimum release age; shown, never installed. */
+  waiting: OutdatedEntry[];
+  errors: { name: string; message: string }[];
+}
+
+const publishedBefore = (packument: Packument, version: string, cutoff: number) => {
+  const published = packument.time?.[version];
+  return published === undefined || Date.parse(published) <= cutoff;
+};
+
 export async function computeOutdated(
   workspace: Workspace,
   registry: RegistryClient,
   options: OutdatedOptions = {},
-): Promise<{ entries: OutdatedEntry[]; errors: { name: string; message: string }[] }> {
+): Promise<OutdatedResult> {
   const pins = new Set(options.majorPins ?? DEFAULT_MAJOR_PINS);
   const now = options.now ?? new Date();
   const ageExclude = new Set(workspace.minimumReleaseAgeExclude.map((e) => e.replace(/@[^@/]*$/, "")));
   const errors: { name: string; message: string }[] = [];
+  const waiting = new Set<OutdatedEntry>();
 
   const results = await Promise.all(
     collectCandidates(workspace).map(async (candidate): Promise<OutdatedEntry | undefined> => {
@@ -185,24 +187,28 @@ export async function computeOutdated(
         const minAge = ageExclude.has(candidate.name) ? 0 : workspace.minimumReleaseAgeMinutes;
         const pinMajor = pins.has(candidate.name);
         const quick = pickLatest(abbreviated, current, { pinMajor, minAgeMinutes: 0, now });
-        // Excluded packages still need publish times, so a too-new version can be flagged.
-        const needsFull =
-          workspace.minimumReleaseAgeMinutes > 0 && quick.version !== undefined && quick.version !== current;
+        // Publish times only come with the full document: the age rule and each row's release time need them.
+        const needsFull = quick.version !== undefined && quick.version !== current;
         const packument = needsFull ? ((await registry.full(candidate.name)) ?? abbreviated) : abbreviated;
-        const { version: latest, heldBackByAge } = needsFull
-          ? pickLatest(packument, current, { pinMajor, minAgeMinutes: minAge, now })
-          : quick;
+        const picked = needsFull ? pickLatest(packument, current, { pinMajor, minAgeMinutes: minAge, now }) : quick;
+        const bumpTo = (version: string) => (current ? classifyBump(current, version) : "none");
+
+        let latest = picked.version;
+        const isWaiting =
+          picked.newest !== undefined && (!latest || bumpTo(latest) === "none") && bumpTo(picked.newest) !== "none";
+        if (isWaiting) latest = picked.newest;
         if (!latest) return undefined;
 
-        const bump = current ? classifyBump(current, latest) : "none";
+        const bump = bumpTo(latest);
         if (bump === "none" && !options.includeUpToDate) return undefined;
-        const wanted = semver.maxSatisfying(Object.keys(packument.versions), candidate.range) ?? undefined;
+        const cutoff = now.getTime() - minAge * 60_000;
+        const installable = Object.keys(packument.versions).filter(
+          (v) => isWaiting || publishedBefore(packument, v, cutoff),
+        );
+        const wanted = semver.maxSatisfying(installable, candidate.range) ?? undefined;
         const meta = packument.versions[latest];
         const publishedAt = packument.time?.[latest];
-        const tooNew =
-          publishedAt !== undefined &&
-          now.getTime() - Date.parse(publishedAt) < workspace.minimumReleaseAgeMinutes * 60_000;
-        return {
+        const entry: OutdatedEntry = {
           name: candidate.name,
           usages: candidate.usages,
           catalog: candidate.catalog,
@@ -213,20 +219,28 @@ export async function computeOutdated(
           latest,
           bump,
           deprecated: deprecationOf(packument, current),
-          heldBackByAge,
-          ...(tooNew
-            ? { newerThanReleaseAge: { publishedAt, minAgeMinutes: workspace.minimumReleaseAgeMinutes } }
+          heldBackByAge: picked.heldBackByAge && !isWaiting,
+          publishedAt,
+          ...(isWaiting && publishedAt
+            ? { readyAt: new Date(Date.parse(publishedAt) + minAge * 60_000).toISOString() }
             : {}),
           enginesNode: nodeEngine(meta?.engines),
           peerDependencies: meta?.peerDependencies,
         };
+        if (isWaiting) waiting.add(entry);
+        return entry;
       } catch (error) {
         errors.push({ name: candidate.name, message: error instanceof Error ? error.message : String(error) });
         return undefined;
       }
     }),
   );
-  return { entries: results.filter((e): e is OutdatedEntry => e !== undefined), errors };
+  const found = results.filter((e): e is OutdatedEntry => e !== undefined);
+  return {
+    entries: found.filter((e) => !waiting.has(e)),
+    waiting: found.filter((e) => waiting.has(e)),
+    errors,
+  };
 }
 
 export interface PeerConflict {

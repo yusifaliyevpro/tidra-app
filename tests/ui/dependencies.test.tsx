@@ -112,3 +112,40 @@ describe("Dependencies", () => {
     expect(screen.getByRole<HTMLInputElement>("checkbox", { name: "Select b" }).checked).toBe(true);
   });
 });
+
+describe("Dependencies waiting for minimumReleaseAge", () => {
+  const waitingTree = (outdated: OutdatedEntry[], waiting: OutdatedEntry[]) => (
+    <QueryClientProvider client={svc.queryClient}>
+      <ServicesProvider value={{ svc, processes: createProcessManager(svc) }}>
+        <Dependencies projectId="p1" report={{ ...projectReport(outdated), waiting }} onStarted={() => undefined} />
+      </ServicesProvider>
+    </QueryClientProvider>
+  );
+
+  it("shows waiting updates but never picks them, even with select all", async () => {
+    const user = userEvent.setup();
+    const young = { ...entry("next-intl", "4.14.10", "4.14.11", "patch"), readyAt: "2999-01-01T00:00:00.000Z" };
+    render(waitingTree([entry("a", "1.0.0", "1.0.1", "patch")], [young]));
+    expect(screen.getByText("Waiting for minimumReleaseAge")).toBeTruthy();
+    const box = screen.getByRole("checkbox", { name: "Select next-intl" });
+    expect(box.hasAttribute("disabled")).toBe(true);
+
+    await user.click(screen.getByRole("checkbox", { name: "Select all updates" }));
+    await user.click(button("Update"));
+    expect(startUpdate).toHaveBeenCalledWith(svc, "p1", [
+      { entry: expect.objectContaining({ name: "a" }), version: "1.0.1" },
+    ]);
+  });
+
+  it("lists a project whose only updates are waiting instead of calling it up to date", () => {
+    render(waitingTree([], [entry("next-intl", "4.14.10", "4.14.11", "patch")]));
+    expect(screen.queryByText("Up to date")).toBeNull();
+    expect(screen.getByRole("button", { name: /next-intl/ })).toBeTruthy();
+  });
+
+  it("shows how long ago the target was published", () => {
+    const published = new Date(Date.now() - 3 * 86_400_000).toISOString();
+    render(waitingTree([{ ...entry("a", "1.0.0", "1.0.1", "patch"), publishedAt: published }], []));
+    expect(screen.getByText("3d")).toBeTruthy();
+  });
+});
