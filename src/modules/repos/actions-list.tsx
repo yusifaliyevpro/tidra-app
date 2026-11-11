@@ -1,10 +1,19 @@
 import { useMutation } from "@tanstack/react-query";
 import { ArrowRight, ClipboardCopy, ExternalLink } from "lucide-react";
+import { useState } from "react";
 import { useServices } from "@/app/services";
-import { actionsUpdatePrompt, applyActionUpdatesToRepo, type ActionItem, type ActionsReport } from "@/services/actions";
+import { isEditableInput, type ToolInput } from "@/engine/actions";
+import {
+  actionsUpdatePrompt,
+  applyActionUpdatesToRepo,
+  setToolVersion,
+  type ActionItem,
+  type ActionsReport,
+} from "@/services/actions";
 import type { RepoGroup } from "@/services/repos";
 import { Button, IconButton } from "@/ui/button";
 import { openExternal } from "@/ui/external";
+import { Input } from "@/ui/field";
 import { ErrorNote } from "@/ui/layout";
 import { Mono } from "@/ui/misc";
 import { toast, toastError } from "@/ui/toast";
@@ -55,6 +64,9 @@ export function ActionsList({ repo, report }: { repo: RepoGroup; report: Actions
           ) : item.style === "branch" ? (
             <span className="text-faint">tracks a branch</span>
           ) : null}
+          {item.inputs?.map((input) => (
+            <ToolVersion key={input.line} repoKey={repo.key} item={item} input={input} />
+          ))}
           <span className="ml-auto flex items-center gap-1">
             <IconButton
               size="sm"
@@ -96,5 +108,65 @@ export function ActionsList({ repo, report }: { repo: RepoGroup; report: Actions
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** The tool version a setup step pins (`node-version: 24`); a plain value edits in place and commits like an update. */
+function ToolVersion({ repoKey, item, input }: { repoKey: string; item: ActionItem; input: ToolInput }) {
+  const svc = useServices();
+  const [draft, setDraft] = useState<string | undefined>(undefined);
+  const save = useMutation({
+    mutationFn: (value: string) => setToolVersion(svc, repoKey, item, input, value),
+    onSuccess: ({ message, branch }) => {
+      setDraft(undefined);
+      toast(`Committed on ${branch}: ${message}`);
+    },
+    onError: toastError,
+  });
+  const label = `${input.tool} version`;
+  if (!isEditableInput(input)) {
+    return (
+      <span className="flex min-w-0 items-center gap-1.5" title={`${label} comes from an expression`}>
+        <span className="text-faint">{input.tool}</span>
+        <Mono className="truncate text-muted">{input.value}</Mono>
+      </span>
+    );
+  }
+  if (draft === undefined) {
+    return (
+      <Button
+        size="sm"
+        variant="ghost"
+        title={`Change ${label}`}
+        aria-label={`${label} ${input.value}, change`}
+        onClick={() => setDraft(input.value)}
+      >
+        <span className="text-faint">{input.tool}</span>
+        <Mono className="text-fg">{input.value}</Mono>
+      </Button>
+    );
+  }
+  return (
+    <span className="flex shrink-0 items-center gap-1.5">
+      <span className="text-faint">{input.tool}</span>
+      <Input
+        // oxlint-disable-next-line jsx-a11y/no-autofocus -- the field appears because the user asked to type in it
+        autoFocus
+        aria-label={label}
+        className="h-6 w-20 px-1.5 font-mono text-sm"
+        value={draft}
+        readOnly={save.isPending}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => !save.isPending && setDraft(undefined)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && draft.trim() === input.value) setDraft(undefined);
+          else if (e.key === "Enter" && draft.trim()) save.mutate(draft);
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            setDraft(undefined);
+          }
+        }}
+      />
+    </span>
   );
 }
