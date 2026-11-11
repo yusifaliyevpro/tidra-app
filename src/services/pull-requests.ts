@@ -8,7 +8,6 @@ import { checkoutOf, refreshProject, type GitInfoCache } from "./projects";
 export const UPDATE_BRANCH_PREFIX = "tidra/deps-";
 
 export const isUpdateBranch = (branch: string | undefined) => Boolean(branch?.startsWith(UPDATE_BRANCH_PREFIX));
-export const ACTIONS_BRANCH_PREFIX = "tidra/actions-";
 
 /** Any branch Tidra created (dependency or Actions updates): these get Push and Open PR buttons. */
 export const isTidraBranch = (branch: string | undefined) => Boolean(branch?.startsWith("tidra/"));

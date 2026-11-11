@@ -60,24 +60,25 @@ async function withRepo(branch: string) {
 }
 
 describe("applyActionUpdatesToRepo", () => {
-  it("commits on a new Actions branch cut from the default branch, never on the current one", async () => {
+  it("commits on the current branch and never switches", async () => {
     const { io, svc, close } = await withRepo("feature/login");
     const { branch, message } = await applyActionUpdatesToRepo(svc, "github.com/me/web", [item({ line: 3 })]);
     close();
-    expect(branch).toMatch(/^tidra\/actions-\d{8}-\d{4}$/);
+    expect(branch).toBe("feature/login");
     expect(message).toBe("ci: bump actions/checkout to v5.0.0");
     const lines = io.runs.map((r) => r.args.join(" "));
-    expect(lines).toContain(`switch --no-track -c ${branch} origin/main`);
+    expect(lines.some((l) => l.startsWith("switch"))).toBe(false);
     expect(lines.some((l) => l.startsWith("commit -m ci: bump actions/checkout"))).toBe(true);
     expect(io.files.get("/code/web/.github/workflows/ci.yml")).toContain("actions/checkout@v5");
   });
 
-  it("keeps adding to the Actions branch that is already checked out", async () => {
-    const { io, svc, close } = await withRepo("tidra/actions-20261101-1200");
-    const { branch } = await applyActionUpdatesToRepo(svc, "github.com/me/web", [item({ line: 3 })]);
+  it("changes nothing when the branch already has these actions up to date", async () => {
+    const { io, svc, close } = await withRepo("feature/login");
+    await expect(applyActionUpdatesToRepo(svc, "github.com/me/web", [item({ line: 3, ref: "v3" })])).rejects.toThrow(
+      "already up to date on this branch",
+    );
     close();
-    expect(branch).toBe("tidra/actions-20261101-1200");
-    expect(io.runs.some((r) => r.args[0] === "switch")).toBe(false);
+    expect(io.runs.some((r) => ["switch", "commit", "branch"].includes(r.args[0] ?? ""))).toBe(false);
   });
 });
 
