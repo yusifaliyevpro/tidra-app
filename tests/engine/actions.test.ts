@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { applyActionUpdates, currentVersion, nextRef, parseWorkflowUses, refStyle } from "@/engine/actions";
+import {
+  applyActionUpdates,
+  currentVersion,
+  isEditableInput,
+  nextRef,
+  parseWorkflowUses,
+  refStyle,
+  setInputValue,
+} from "@/engine/actions";
 
 const WORKFLOW = `name: CI
 on: [push]
@@ -126,5 +134,64 @@ describe("actions edge cases", () => {
         { line: 9, ref: "v5" },
       ]),
     ).toBe(text);
+  });
+});
+
+describe("tool versions in setup steps", () => {
+  const CI = `jobs:
+  quality:
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.x
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24 # current LTS
+          cache: pnpm
+      - with:
+          node-version: "\${{ matrix.node }}"
+        uses: actions/setup-node@v7
+      - uses: actions/setup-node@v7
+      - name: Other
+        with:
+          version: 9
+        uses: some/action@v1
+`;
+  const uses = parseWorkflowUses(CI);
+
+  it("reads pnpm's version and setup-node's node-version from the step's with block", () => {
+    expect(uses.map((u) => [u.action, u.inputs?.map((i) => [i.tool, i.value, i.line])])).toEqual([
+      ["actions/checkout", undefined],
+      ["pnpm/action-setup", [["pnpm", "11.x", 8]]],
+      ["actions/setup-node", [["Node.js", "24", 13]]],
+      ["actions/setup-node", [["Node.js", "${{ matrix.node }}", 16]]],
+      ["actions/setup-node", undefined],
+      ["some/action", undefined],
+    ]);
+  });
+
+  it("treats expressions as read-only", () => {
+    expect(uses[2]?.inputs?.map(isEditableInput)).toEqual([true]);
+    expect(uses[3]?.inputs?.map(isEditableInput)).toEqual([false]);
+  });
+
+  it("rewrites only the value and keeps quotes, comments and line endings", () => {
+    expect(setInputValue(CI, 13, "22")).toContain("          node-version: 22 # current LTS\n          cache: pnpm\n");
+    expect(setInputValue("with:\r\n  node-version: '20'\r\n", 1, "22")).toBe("with:\r\n  node-version: '22'\r\n");
+  });
+
+  it("quotes values YAML would otherwise read as a number or something else", () => {
+    expect(setInputValue(CI, 13, "20.10")).toContain('node-version: "20.10" # current LTS');
+    expect(setInputValue(CI, 8, "lts/*")).toContain("version: lts/*\n");
+    expect(setInputValue(CI, 8, "a: b")).toContain('version: "a: b"\n');
+  });
+
+  it("leaves a line that holds no input alone", () => {
+    expect(setInputValue(CI, 0, "22")).toBe(CI);
   });
 });

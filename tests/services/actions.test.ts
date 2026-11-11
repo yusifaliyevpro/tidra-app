@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { actionsUpdatePrompt, applyActionUpdatesToRepo, scanActions, type ActionItem } from "@/services/actions";
+import {
+  actionsUpdatePrompt,
+  applyActionUpdatesToRepo,
+  scanActions,
+  setToolVersion,
+  type ActionItem,
+} from "@/services/actions";
 import { jsonResponse, memoryIo, ok } from "../support/memory-io";
 import { testServices } from "../support/services";
 
@@ -70,6 +76,52 @@ describe("applyActionUpdatesToRepo", () => {
     close();
     expect(branch).toBe("tidra/actions-20261101-1200");
     expect(io.runs.some((r) => r.args[0] === "switch")).toBe(false);
+  });
+});
+
+async function withWorkflow(text: string) {
+  const setup = await withRepo("feature/login");
+  setup.io.files.set("/code/web/.github/workflows/ci.yml", text);
+  return setup;
+}
+
+describe("setToolVersion", () => {
+  const CI =
+    "jobs:\n  ci:\n    steps:\n      - uses: actions/setup-node@v7\n        with:\n          node-version: 24\n";
+  const node = { line: 5, name: "node-version", tool: "Node.js", value: "24" };
+  const step = { file: ".github/workflows/ci.yml", action: "actions/setup-node" };
+
+  it("writes the new version and commits it on an Actions branch cut from the default branch", async () => {
+    const { io, svc, close } = await withWorkflow(CI);
+    const { branch, message } = await setToolVersion(svc, "github.com/me/web", step, node, " 22 ");
+    close();
+    expect(message).toBe("ci: use Node.js 22");
+    expect(branch).toMatch(/^tidra\/actions-/);
+    expect(io.files.get("/code/web/.github/workflows/ci.yml")).toContain("          node-version: 22\n");
+    const lines = io.runs.map((r) => r.args.join(" "));
+    expect(lines).toContain(`switch --no-track -c ${branch} origin/main`);
+    expect(lines).toContain("commit -m ci: use Node.js 22 -- .github/workflows/ci.yml");
+  });
+
+  it("refuses an empty or unchanged version before touching git", async () => {
+    const { io, svc, close } = await withWorkflow(CI);
+    await expect(setToolVersion(svc, "github.com/me/web", step, node, "  ")).rejects.toThrow(
+      "Enter a Node.js version.",
+    );
+    await expect(setToolVersion(svc, "github.com/me/web", step, node, "24")).rejects.toThrow("already 24");
+    close();
+    expect(io.runs).toEqual([]);
+  });
+
+  it("goes back and deletes the new branch when the default branch no longer sets that version", async () => {
+    const { io, svc, close } = await withWorkflow(CI.replace("24", "20"));
+    await expect(setToolVersion(svc, "github.com/me/web", step, node, "22")).rejects.toThrow(
+      "no longer sets Node.js 24",
+    );
+    close();
+    const lines = io.runs.map((r) => r.args.join(" "));
+    expect(lines.some((l) => l.startsWith("commit"))).toBe(false);
+    expect(lines.some((l) => l.startsWith("branch -D tidra/actions-"))).toBe(true);
   });
 });
 
