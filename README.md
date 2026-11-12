@@ -67,7 +67,7 @@ Requirements: Node 24+, pnpm 12, Rust (stable), and the [Tauri prerequisites](ht
 ```bash
 pnpm install
 pnpm dev        # desktop app with hot reload
-pnpm web        # UI only, in the browser, with mocked native calls
+pnpm web        # UI only, in the browser, with mocked native calls for demo
 pnpm test
 pnpm fmt && pnpm check
 ```
