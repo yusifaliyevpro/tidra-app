@@ -5,7 +5,7 @@ version = "0.0.0"
 description = "Keep every project you maintain up to date from one desktop app."
 license = "AGPL-3.0-or-later"
 edition = "2024"
-rust-version = "1.98"
+rust-version = "1.100"
 
 [lib]
 name = "tidra_lib"
@@ -28,12 +28,13 @@ tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["process", "io-util", "rt", "sync", "macros", "time"] }
-keyring = { version = "3", features = ["windows-native", "apple-native", "sync-secret-service", "crypto-rust"] }
+keyring = "4"
 listeners = "0.6"
-rusqlite = { version = "0.41", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 which = "8"
 # All webview HTTP (src/http.rs); registry documents come 5-10x smaller compressed.
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "gzip", "brotli"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "gzip", "brotli"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["net"] }
