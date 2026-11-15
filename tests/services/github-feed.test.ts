@@ -37,6 +37,34 @@ describe("currentRuns", () => {
     expect(currentRuns(runs, "main", new Set(["feature/open"])).map((r) => r.id)).toEqual([5, 3, 2]);
   });
 
+  it("drops runs of commits older than the branch's latest one", () => {
+    const runs = [
+      run(5, "CI", "main", { head_sha: "new" }),
+      run(4, "Release", "main", { head_sha: "new" }),
+      run(3, "Publish", "main", { head_sha: "old", conclusion: "failure" }),
+      run(2, "CI", "feature/open", { head_sha: "older" }),
+    ];
+    expect(currentRuns(runs, "main", new Set(["feature/open"])).map((r) => r.id)).toEqual([5, 4, 2]);
+  });
+
+  it("counts a workflow once even when each of its runs has its own name", () => {
+    const runs = [
+      run(3, "npm_and_yarn in /. - Update #3", "main", { head_sha: "new", workflow_id: 9 }),
+      run(2, "npm_and_yarn in /. - Update #2", "main", { head_sha: "new", workflow_id: 9, conclusion: "failure" }),
+      run(1, "CI", "main", { head_sha: "new", workflow_id: 1 }),
+    ];
+    expect(currentRuns(runs, "main", new Set()).map((r) => r.id)).toEqual([3, 1]);
+  });
+
+  it("doesn't take a fork's default branch for this repo's", () => {
+    const repository = { full_name: "o/r" };
+    const runs = [
+      run(2, "CI", "main", { head_sha: "theirs", repository, head_repository: { full_name: "them/r" } }),
+      run(1, "CI", "main", { head_sha: "ours", repository, head_repository: repository }),
+    ];
+    expect(currentRuns(runs, "main", new Set()).map((r) => r.id)).toEqual([1]);
+  });
+
   it("keeps nothing without a default branch or open branches", () => {
     expect(currentRuns([run(1, "CI", "main")], undefined, new Set())).toEqual([]);
   });

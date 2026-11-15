@@ -180,6 +180,11 @@ export function createGit(io: Io, cwd: string) {
           "refs/heads",
         ]),
       ),
+    /** origin's branches as last fetched, without the `origin/` prefix. */
+    remoteBranches: async () =>
+      parseBranches(
+        await run(["for-each-ref", "--format=%(refname:lstrip=3)|%(committerdate:unix)|", "refs/remotes/origin"]),
+      ).filter((branch) => branch.name && branch.name !== "HEAD"),
     switchCreate: (name: string) => run(["switch", "-c", name]),
     // On a fork, `git switch` refuses a branch that origin and upstream both have unless told which one to prefer.
     switchTo: (name: string) =>
@@ -187,14 +192,13 @@ export function createGit(io: Io, cwd: string) {
         env: { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "checkout.defaultRemote", GIT_CONFIG_VALUE_0: "origin" },
       }),
     deleteBranch: (name: string) => run(["branch", "-D", name]),
-    /** Local branches whose every commit is already in `base`. */
+    /** Full refs of local and origin branches whose every commit is already in `base`. */
     mergedInto: async (base: string) =>
-      (await run(["for-each-ref", "--merged", base, "--format=%(refname:lstrip=2)", "refs/heads"]))
+      (await run(["for-each-ref", "--merged", base, "--format=%(refname)", "refs/heads", "refs/remotes/origin"]))
         .split(/\r?\n/)
         .filter(Boolean),
     /** A squash merge shares no commits with its branch, so this compares the branch's whole change with `base`. */
-    squashMerged: async (base: string, branch: string) => {
-      const ref = `refs/heads/${branch}`;
+    squashMerged: async (base: string, ref: string) => {
       const mergeBase = await raw(["merge-base", base, ref]);
       if (mergeBase.code !== 0) return false;
       const squashed = await raw(["commit-tree", `${ref}^{tree}`, "-p", mergeBase.stdout.trim(), "-m", "squash"], {
@@ -230,8 +234,9 @@ export function createGit(io: Io, cwd: string) {
         .map((message) => message.trim())
         .filter(Boolean),
     pushCurrent: () => run(["push"], { signal: AbortSignal.timeout(PUSH_LIMIT_MS) }),
-    deleteRemoteBranch: (name: string) =>
-      run(["push", "origin", "--delete", name], { signal: AbortSignal.timeout(PUSH_LIMIT_MS) }),
+    /** One push for all of them: every connection to the remote costs a handshake. */
+    deleteRemoteBranches: (names: string[]) =>
+      run(["push", "origin", "--delete", ...names], { signal: AbortSignal.timeout(PUSH_LIMIT_MS) }),
     /** Tracked files that differ from HEAD, relative to this folder. */
     changedPaths: async () => (await run(["diff", "--name-only", "--relative", "HEAD"])).split(/\r?\n/).filter(Boolean),
     /** One path at a time: git rejects the whole list when any path is untracked (a gitignored lockfile). */

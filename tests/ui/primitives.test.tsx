@@ -108,6 +108,62 @@ describe("Popover", () => {
   });
 });
 
+const px = (value: string) => Number.parseFloat(value) || 0;
+
+describe("Popover placement", () => {
+  let height = 0;
+  let resized: (() => void) | undefined;
+
+  // jsdom has no layout: the panel's box comes from its inline position and a height the test sets.
+  async function openAt(anchorTop: number) {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: () => void) {
+          resized = callback;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(() => height);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(288);
+    vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function top(this: HTMLElement) {
+      return px(this.style.top);
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetLeft", "get").mockImplementation(function left(this: HTMLElement) {
+      return px(this.style.left);
+    });
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(100, anchorTop, 80, 24));
+    render(<Menu onPick={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    const panel = screen.getByRole("button", { name: "Push" }).parentElement;
+    if (!panel) throw new Error("no panel");
+    return panel;
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("moves above its trigger when content that loads later no longer fits below", async () => {
+    height = 40;
+    const panel = await openAt(676);
+    expect(panel.style.top).toBe("704px");
+    height = 300;
+    act(() => resized?.());
+    expect(panel.style.top).toBe("372px");
+  });
+
+  it("caps its height when it fits on neither side", async () => {
+    height = 600;
+    const panel = await openAt(300);
+    expect(panel.style.top).toBe("328px");
+    expect(panel.style.maxHeight).toBe(`${window.innerHeight - 8 - 328}px`);
+  });
+});
+
 describe("toasts", () => {
   it("keeps the four newest and dismisses them on a timer, errors later than info", () => {
     vi.useFakeTimers();

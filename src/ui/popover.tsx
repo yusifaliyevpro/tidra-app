@@ -29,7 +29,14 @@ export function Popover({
   };
 
   useLayoutEffect(() => {
-    if (panel.current && position) keepInWindow(panel.current, position.anchorTop);
+    const el = panel.current;
+    if (!el || !position) return undefined;
+    const place = () => keepInWindow(el, position.top, position.anchorTop);
+    place();
+    // Content that loads after opening (a branch list) grows the panel past the edge it first fit inside.
+    const observer = new ResizeObserver(place);
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [position]);
 
   useEffect(() => {
@@ -93,17 +100,26 @@ export function Popover({
 
 const EDGE = 8;
 
-/** Shifts a fixed panel back inside the window, and flips it above its trigger when there is no room below. */
-function keepInWindow(el: HTMLElement, anchorTop: number) {
+/**
+ * Shifts a fixed panel back inside the window. Without room below its trigger it goes to the side with more room,
+ * and scrolls inside when it fits on neither. `top` is where it opens below the trigger.
+ */
+function keepInWindow(el: HTMLElement, top: number, anchorTop: number) {
   // Layout boxes, not getBoundingClientRect: the opening animation scales the panel down.
-  const { offsetLeft: left, offsetTop: top, offsetWidth: width, offsetHeight: height } = el;
+  const { offsetLeft: left, offsetWidth: width, offsetHeight: height } = el;
   const maxLeft = window.innerWidth - EDGE - width;
   if (left > maxLeft || left < EDGE) {
     el.style.left = `${Math.max(EDGE, Math.min(left, maxLeft))}px`;
     el.style.right = "auto";
   }
-  if (top + height > window.innerHeight - EDGE && anchorTop - 4 - height >= EDGE)
-    el.style.top = `${anchorTop - 4 - height}px`;
+  const below = window.innerHeight - EDGE - top;
+  const above = anchorTop - 4 - EDGE;
+  // Once above it stays there, so filtering a list doesn't make the panel jump sides.
+  if (el.dataset.side === "above" || (height > below && above > below)) {
+    el.dataset.side = "above";
+    if (height > above) el.style.maxHeight = `${above}px`;
+    el.style.top = `${anchorTop - 4 - Math.min(height, above)}px`;
+  } else if (height > below) el.style.maxHeight = `${below}px`;
 }
 
 /** A row in a popover menu. */

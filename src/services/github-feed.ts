@@ -120,16 +120,25 @@ export interface CiSnapshot {
   updatedAt: string;
 }
 
+const fromFork = (run: WorkflowRun) =>
+  Boolean(run.head_repository && run.repository && run.head_repository.full_name !== run.repository.full_name);
+
 /**
- * Latest run per workflow and branch, for the default branch and branches with an open pull request. Runs of merged
- * or closed pull requests are history, not status.
+ * Each workflow's latest run on the newest commit of the default branch and of branches with an open pull request.
+ * Runs of older commits, and of merged or closed pull requests, are history, not status. `runs` is newest first.
  */
 export function currentRuns(runs: WorkflowRun[], defaultBranch: string | undefined, openBranches: Set<string>) {
+  const heads = new Map<string, string | null | undefined>();
   const seen = new Set<string>();
   return runs.filter((run) => {
     const branch = run.head_branch ?? "";
     if (branch !== defaultBranch && !openBranches.has(branch)) return false;
-    const key = `${run.name ?? ""}\u0000${branch}`;
+    // A pull request from a fork's `main` isn't this repo's `main`.
+    if (branch === defaultBranch && fromFork(run)) return false;
+    if (!heads.has(branch)) heads.set(branch, run.head_sha);
+    if (heads.get(branch) !== run.head_sha) return false;
+    // By id: Dependabot names every run of its one workflow differently.
+    const key = `${run.workflow_id ?? run.name ?? ""}\u0000${branch}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -138,8 +147,11 @@ export function currentRuns(runs: WorkflowRun[], defaultBranch: string | undefin
 
 /** Refreshes CI for every repo, or only the `owner/repo`s in `only`, keeping the other repos' last entries. */
 export async function refreshCi(svc: Services, only?: Set<string>): Promise<CiSnapshot> {
-  const github = await svc.github();
-  const [targets, previous] = await Promise.all([projectRepos(svc), only ? readCi(svc) : undefined]);
+  const [github, targets, previous] = await Promise.all([
+    svc.github(),
+    projectRepos(svc),
+    only ? readCi(svc) : undefined,
+  ]);
   const kept = new Map((previous?.entries ?? []).map((entry) => [entry.repo, entry]));
   const entries = await Promise.all(
     targets.map(async (target): Promise<CiEntry> => {

@@ -28,6 +28,8 @@ fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     // GitHub's API rejects requests without a User-Agent.
     CLIENT.get_or_init(|| {
+        // reqwest is built without a TLS provider so it shares ring with the updater; an Err means one is set already.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         reqwest::Client::builder().user_agent("Tidra").timeout(Duration::from_secs(60)).build().unwrap_or_default()
     })
 }

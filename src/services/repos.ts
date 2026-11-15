@@ -147,7 +147,7 @@ export async function deleteBranchEverywhere(svc: Services, projectId: string, n
   ]);
   if (name === status.branch) throw new Error(`${name} is checked out. Switch to another branch first.`);
   if (name === defaultName) throw new Error(`${name} is the default branch and can't be deleted here.`);
-  if (onOrigin) await git.deleteRemoteBranch(name);
+  if (onOrigin) await git.deleteRemoteBranches([name]);
   if (local) await git.deleteBranch(name);
   await showGitState(svc, root, projectIds);
   return local && onOrigin
@@ -166,6 +166,9 @@ export interface BranchDetail {
   merged: boolean;
   upstreamGone: boolean;
   ahead: number;
+  /** Only on origin, with no local copy. */
+  remote: boolean;
+  onOrigin: boolean;
 }
 
 /** The ref merged branches went into: upstream's default branch for a fork, else origin's. */
@@ -178,26 +181,44 @@ async function mergeBase(git: Git): Promise<string | undefined> {
   return undefined;
 }
 
-/** Every local branch and whether it was merged, squash merges included. Newest first, the current branch on top. */
+/**
+ * Every local branch, then origin's branches without a local copy, and whether each was merged, squash merges
+ * included. Newest first, the current branch on top.
+ */
 export async function listBranchDetails(
   svc: Services,
   projectId: string,
 ): Promise<{ base?: string; branches: BranchDetail[] }> {
   const { root } = await checkoutOf(svc, projectId);
   const git = createGit(svc.io, root);
-  const [status, branches, base] = await Promise.all([git.status(), git.branches(), mergeBase(git)]);
+  const [status, locals, remotes, base] = await Promise.all([
+    git.status(),
+    git.branches(),
+    git.remoteBranches().catch(() => []),
+    mergeBase(git),
+  ]);
   const defaultName = base?.replace(/^(origin|upstream)\//, "");
   const merged = new Set(base ? await git.mergedInto(base) : []);
+  const have = new Set(locals.map((branch) => branch.name));
+  const onOrigin = new Set(remotes.map((branch) => branch.name));
+  const all = [
+    ...locals.map((branch) => ({ branch, ref: `refs/heads/${branch.name}`, remote: false })),
+    ...remotes
+      .filter((branch) => !have.has(branch.name))
+      .map((branch) => ({ branch, ref: `refs/remotes/origin/${branch.name}`, remote: true })),
+  ];
   const limit = createLimit(4);
   const details = await Promise.all(
-    branches.map((branch) =>
+    all.map(({ branch, ref, remote }) =>
       limit(async (): Promise<BranchDetail> => {
-        const isMerged = merged.has(branch.name) || (base ? await git.squashMerged(base, branch.name) : false);
+        const isMerged = merged.has(ref) || (base ? await git.squashMerged(base, ref) : false);
         return {
           ...branch,
-          current: branch.name === status.branch,
+          current: !remote && branch.name === status.branch,
           isDefault: branch.name === defaultName,
           merged: isMerged,
+          remote,
+          onOrigin: onOrigin.has(branch.name),
         };
       }),
     ),
@@ -210,19 +231,48 @@ export async function listBranchDetails(
   };
 }
 
-const firstLine = (error: unknown) => (error instanceof Error ? error.message : String(error)).split("\n")[0];
+const firstLine = (error: unknown) => (error instanceof Error ? error.message : String(error)).split("\n")[0] ?? "";
 
 /**
- * Deletes local branches, merged or not: asking first about unmerged ones is the caller's job. The checked-out branch
- * is never touched, and copies on a remote stay. Returns a line for the toast.
+ * Deletes branches here and their copies on origin, merged or not: asking first about unmerged ones is the caller's
+ * job. The checked-out branch is skipped and the default branch refused. Returns a line for the toast.
  */
 export async function deleteBranches(svc: Services, projectId: string, names: string[]): Promise<string> {
   const { root, projectIds } = await checkoutOf(svc, projectId);
   const git = createGit(svc.io, root);
-  const { branch: current } = await git.status();
+  const [{ branch: current }, defaultName, locals, remotes] = await Promise.all([
+    git.status(),
+    git.defaultBranch(),
+    git.branches(),
+    git.remoteBranches().catch(() => []),
+  ]);
+  const local = new Set(locals.map((branch) => branch.name));
+  const origin = new Set(remotes.map((branch) => branch.name));
   const deleted: string[] = [];
   const failed: string[] = [];
-  for (const name of names.filter((n) => n !== current)) {
+  const wanted = names.filter((name) => name !== current);
+  if (defaultName && wanted.includes(defaultName)) failed.push(`${defaultName}: it is the default branch`);
+  const deletable = wanted.filter((name) => name !== defaultName);
+
+  // origin first: if it refuses, the local copy still holds the commits.
+  const onOrigin = deletable.filter((name) => origin.has(name));
+  const kept = new Set<string>();
+  if (onOrigin.length > 0) {
+    const error = await git.deleteRemoteBranches(onOrigin).then(() => undefined, firstLine);
+    if (error !== undefined) {
+      // A push can delete some branches and fail others; the deleted ones lost their tracking ref.
+      const left = new Set((await git.remoteBranches().catch(() => [])).map((branch) => branch.name));
+      for (const name of onOrigin.filter((n) => left.has(n))) {
+        kept.add(name);
+        failed.push(`${name}: ${error}`);
+      }
+    }
+  }
+  for (const name of deletable.filter((n) => !kept.has(n))) {
+    if (!local.has(name)) {
+      deleted.push(name);
+      continue;
+    }
     // One at a time: git locks refs (and packed-refs) while deleting, so parallel deletes fail.
     // react-doctor-disable-next-line react-doctor/async-await-in-loop
     await git.deleteBranch(name).then(

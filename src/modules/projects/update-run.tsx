@@ -71,7 +71,7 @@ export function UpdateRunDialog({
         <StatusHeader progress={progress} />
         <Stepper steps={progress?.steps ?? {}} />
         {result && !result.ok ? <Failure result={result} /> : null}
-        <Output log={progress?.log ?? ""} defaultOpen={!result?.ok} key={result ? "done" : "running"} />
+        <Output log={progress?.log ?? ""} />
       </div>
     </Dialog>
   );
@@ -196,8 +196,9 @@ function Failure({ result }: { result: UpdateResult }) {
   );
 }
 
-function Output({ log, defaultOpen }: { log: string; defaultOpen: boolean }) {
-  const [open, setOpen] = useState(defaultOpen);
+/** Stays as the user left it when the run ends: the checks' output is what they read next. */
+function Output({ log }: { log: string }) {
+  const [open, setOpen] = useState(true);
   return (
     <div className="flex flex-col gap-2">
       <button
