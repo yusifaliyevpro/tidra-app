@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { GitMerge, Trash2 } from "lucide-react";
+import { Cloud, GitMerge, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useServices } from "@/app/services";
 import { deleteBranches, listBranchDetails, type BranchDetail } from "@/services/repos";
@@ -12,7 +12,7 @@ import { toast, toastError } from "@/ui/toast";
 
 const deletable = (branch: BranchDetail) => !branch.current && !branch.isDefault;
 
-/** A repo's local branches, which ones are merged, and deleting them one at a time or all at once. */
+/** A repo's branches, here and on origin, which ones are merged, and deleting them one at a time or all at once. */
 export function BranchesDialog({
   projectId,
   label,
@@ -112,6 +112,11 @@ function BranchRow({
       <span className="min-w-0 truncate font-mono text-sm" title={branch.name}>
         {branch.name}
       </span>
+      {branch.remote ? (
+        <span title="Only on origin" className="shrink-0 text-faint">
+          <Cloud aria-label="Only on origin" className="size-3.5" strokeWidth={1.5} />
+        </span>
+      ) : null}
       {branch.current ? <Badge tone="info">current</Badge> : null}
       {branch.isDefault ? <Badge>default</Badge> : null}
       {branch.upstreamGone ? <Badge tone="warn">remote deleted</Badge> : null}
@@ -177,9 +182,11 @@ function ConfirmDelete({
     >
       <p className="text-sm">
         {branches ? confirmText(branches, base) : null}
-        {risky ? " Commits that were never pushed will be lost." : null}
+        {risky ? " Unmerged commits are lost." : null}
       </p>
-      <p className="mt-2 text-sm text-muted">Copies on the remote stay.</p>
+      {branches?.some((b) => b.onOrigin) ? (
+        <p className="mt-2 text-sm text-muted">Copies on origin are deleted too.</p>
+      ) : null}
     </Dialog>
   );
 }

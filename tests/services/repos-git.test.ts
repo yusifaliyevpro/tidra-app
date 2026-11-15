@@ -182,7 +182,18 @@ describe("branches and sync on real repositories", { timeout: 30_000 }, () => {
         merged: { merged: true, current: false, isDefault: false },
         squashed: { merged: true, current: false, isDefault: false },
         experiment: { merged: false, current: false, isDefault: false },
+        shared: { merged: false, current: false, isDefault: false },
       });
+    });
+
+    it("lists branches that only exist on origin", async () => {
+      const { work } = branchesInEveryState();
+      git(work, "branch", "--quiet", "-D", "squashed");
+      const svc = await open(work);
+      const byName = Object.fromEntries((await listBranchDetails(svc, "p1")).branches.map((b) => [b.name, b]));
+      expect(byName.shared).toMatchObject({ remote: true, onOrigin: true, merged: false });
+      expect(byName.squashed).toMatchObject({ remote: true, onOrigin: true, merged: true });
+      expect(byName.experiment).toMatchObject({ remote: false, onOrigin: false });
     });
 
     it("deletes an unmerged branch and shows it gone", async () => {
@@ -200,11 +211,28 @@ describe("branches and sync on real repositories", { timeout: 30_000 }, () => {
       expect(git(work, "branch", "--format=%(refname:short)")).toBe("main");
     });
 
-    it("leaves copies on the remote alone", async () => {
+    it("deletes the copy on origin too", async () => {
       const { work } = branchesInEveryState();
       const svc = await open(work);
       await deleteBranches(svc, "p1", ["squashed"]);
-      expect(git(work, "ls-remote", "origin", "refs/heads/squashed")).not.toBe("");
+      expect(git(work, "branch", "--list", "squashed")).toBe("");
+      expect(git(work, "ls-remote", "origin", "refs/heads/squashed")).toBe("");
+    });
+
+    it("deletes a branch that only exists on origin", async () => {
+      const { work } = branchesInEveryState();
+      const svc = await open(work);
+      expect(await deleteBranches(svc, "p1", ["shared"])).toBe("Deleted shared.");
+      expect(git(work, "ls-remote", "origin", "refs/heads/shared")).toBe("");
+      expect((await listBranchDetails(svc, "p1")).branches.map((b) => b.name)).not.toContain("shared");
+    });
+
+    it("never deletes the default branch", async () => {
+      const { work } = branchesInEveryState();
+      git(work, "switch", "--quiet", "experiment");
+      const svc = await open(work);
+      await expect(deleteBranches(svc, "p1", ["main"])).rejects.toThrow("default branch");
+      expect(git(work, "ls-remote", "origin", "refs/heads/main")).not.toBe("");
     });
 
     it("says why when a branch can't be deleted", async () => {
