@@ -8,3 +8,27 @@ trustPolicyExclude:
   - semver@6.3.1
 allowBuilds:
   esbuild: true
+skills:
+  dirs:
+    - ".agents/skills"
+minimumReleaseAgeExclude:
+  - "@ai-sdk/anthropic@4.0.107"
+  - "@ai-sdk/gateway@4.0.152"
+  - "@ai-sdk/openai-compatible@3.0.94"
+  - "@ai-sdk/provider-utils@5.0.83"
+  - "@oxlint-tsgolint/darwin-arm64@7.0.2008"
+  - "@oxlint-tsgolint/darwin-x64@7.0.2008"
+  - "@oxlint-tsgolint/linux-arm64@7.0.2008"
+  - "@oxlint-tsgolint/linux-x64@7.0.2008"
+  - "@oxlint-tsgolint/win32-arm64@7.0.2008"
+  - "@oxlint-tsgolint/win32-x64@7.0.2008"
+  - ai@7.0.179
+  - greenly@1.4.0
+  - oxlint-tsgolint@7.0.2008
+permissions:
+  "@tanstack/react-router":
+    skills: true
+  "@tanstack/router-plugin":
+    skills: true
+  ai:
+    skills: true

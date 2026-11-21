@@ -5,16 +5,16 @@
 <p align="center">Keep every project you maintain up to date, from one desktop app.</p>
 
 <p align="center">
-  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v1.0.11/Tidra_1.0.11_x64-setup.exe"><img src="https://img.shields.io/badge/Windows-Download-3a74d8?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" /></a>
-  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v1.0.11/Tidra_1.0.11_universal.dmg"><img src="https://img.shields.io/badge/macOS-Download-3a74d8?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
-  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v1.0.11/Tidra_1.0.11_amd64.AppImage"><img src="https://img.shields.io/badge/Linux-Download-3a74d8?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux (AppImage)" /></a>
+  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v1.1.0/Tidra_1.1.0_x64-setup.exe"><img src="https://img.shields.io/badge/Windows-Download-3a74d8?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" /></a>
+  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v1.1.0/Tidra_1.1.0_universal.dmg"><img src="https://img.shields.io/badge/macOS-Download-3a74d8?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
+  <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v1.1.0/Tidra_1.1.0_amd64.AppImage"><img src="https://img.shields.io/badge/Linux-Download-3a74d8?style=for-the-badge&logo=linux&logoColor=white" alt="Download for Linux (AppImage)" /></a>
 </p>
 
 <p align="center">
   <sub>
     Windows x64 · macOS (Apple silicon and Intel) · Linux x64:
-    <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v1.0.11/Tidra_1.0.11_amd64.deb">.deb</a>,
-    <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v1.0.11/Tidra-1.0.11-1.x86_64.rpm">.rpm</a>,
+    <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v1.1.0/Tidra_1.1.0_amd64.deb">.deb</a>,
+    <a href="https://github.com/yusifaliyevpro/tidra-app/releases/download/v1.1.0/Tidra-1.1.0-1.x86_64.rpm">.rpm</a>,
     <a href="https://github.com/yusifaliyevpro/tidra-app/releases/latest">all releases</a>
   </sub>
 </p>
