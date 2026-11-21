@@ -1,6 +1,6 @@
 /** Output dialogs closed while their work still ran, so the header can bring them back. */
 export type DismissedWork =
-  | { kind: "run"; id: string; label: string; projectId: string; path?: string }
+  | { kind: "run"; id: string; name: string; projectId: string; path?: string }
   | { kind: "process"; id: string; label: string };
 
 let items: DismissedWork[] = [];

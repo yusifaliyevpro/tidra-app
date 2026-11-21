@@ -178,7 +178,17 @@ export function createRegistryClient(options: {
 function shared<T>(map: Map<string, Promise<T>>, key: string, reuseMs: number, task: () => Promise<T>): Promise<T> {
   const existing = map.get(key);
   if (existing) return existing;
-  const promise = task().finally(() => setTimeout(() => map.delete(key), reuseMs));
+  // A failure is forgotten at once, so the next check asks again instead of repeating it.
+  const promise = task().then(
+    (value) => {
+      setTimeout(() => map.delete(key), reuseMs);
+      return value;
+    },
+    (error: unknown) => {
+      if (map.get(key) === promise) map.delete(key);
+      throw error;
+    },
+  );
   map.set(key, promise);
   return promise;
 }

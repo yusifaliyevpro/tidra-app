@@ -24,14 +24,39 @@ function useRunState(id: string, enabled: boolean): State {
   return state;
 }
 
+/** A finished chip stays this long (paused while hovered), then leaves; a failed one stays until closed. */
+export const DONE_CHIP_MS = 6000;
+
+export function chipLabel(work: DismissedWork, state: State): string {
+  if (work.kind === "process") return work.label;
+  const name = work.name ? ` ${work.name}` : "";
+  if (state === "running") return `Updating${name}`;
+  return state === "ok" ? `Updated${name}` : `Update failed${name ? `:${name}` : ""}`;
+}
+
+function useForgetWhenDone(id: string, done: boolean, paused: boolean) {
+  useEffect(() => {
+    if (!done || paused) return undefined;
+    const timer = setTimeout(() => dismissedWork.remove(id), DONE_CHIP_MS);
+    return () => clearTimeout(timer);
+  }, [id, done, paused]);
+}
+
 function WorkChip({ work, onOpen }: { work: DismissedWork; onOpen: () => void }) {
   const processes = useProcessList();
   const runState = useRunState(work.id, work.kind === "run");
+  const [hovered, setHovered] = useState(false);
   const proc = work.kind === "process" ? processes.find((p) => p.id === work.id) : undefined;
   const state: State =
     work.kind === "run" ? runState : proc?.running ? "running" : proc?.exitCode === 0 ? "ok" : "failed";
+  useForgetWhenDone(work.id, state === "ok", hovered);
+  const label = chipLabel(work, state);
   return (
-    <span className="pointer-events-auto flex h-6 min-w-0 items-center rounded-full bg-selected text-sm text-muted">
+    <span
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      className="pointer-events-auto flex h-6 min-w-0 shrink animate-pop-in items-center rounded-full bg-selected text-sm text-muted"
+    >
       <button
         type="button"
         title="Show output"
@@ -45,11 +70,11 @@ function WorkChip({ work, onOpen }: { work: DismissedWork; onOpen: () => void })
         ) : (
           <CircleX className="size-3.5 shrink-0 text-bad" />
         )}
-        <span className="truncate">{work.label}</span>
+        <span className="truncate">{label}</span>
       </button>
       <button
         type="button"
-        aria-label={`Forget ${work.label}`}
+        aria-label={`Forget ${label}`}
         onClick={() => dismissedWork.remove(work.id)}
         className="flex size-6 shrink-0 items-center justify-center rounded-r-full hover:text-fg"
       >
@@ -88,7 +113,7 @@ function ReopenedDialog({
           runId={open.id}
           projectId={open.projectId}
           path={open.path}
-          name={open.label.replace(/^Updating /, "")}
+          name={open.name}
           onClose={() => setOpen(undefined)}
         />
       ) : null}

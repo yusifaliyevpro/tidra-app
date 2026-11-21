@@ -36,6 +36,29 @@ describe("pullTarget", () => {
     close();
     expect(target).toEqual({ repo: "me/app", remote: "origin", headOwner: "me" });
   });
+
+  it("targets the parent of a fork cloned without an upstream remote", async () => {
+    const io = memoryIo(
+      {},
+      {
+        run: remotes(),
+        fetch: async () =>
+          jsonResponse({
+            full_name: "me/docs",
+            default_branch: "main",
+            stargazers_count: 0,
+            open_issues_count: 0,
+            html_url: "u",
+            parent: { full_name: "acme/docs" },
+          }),
+      },
+    );
+    const { svc, close } = await testServices(io);
+    await svc.setSecret(SECRET_KEYS.github, "ghp_test");
+    const target = await pullTarget(svc, "/r", "github.com/me/docs");
+    close();
+    expect(target).toEqual({ repo: "acme/docs", remote: "origin", headOwner: "me" });
+  });
 });
 
 async function stoppedUpdate(message: string, otherWork?: string[]) {

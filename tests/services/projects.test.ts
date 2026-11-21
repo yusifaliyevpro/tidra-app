@@ -48,6 +48,36 @@ describe("refreshProject", () => {
     expect(second?.checkedAt).toBe(first?.checkedAt);
     expect(forced?.checkedAt).not.toBe(first?.checkedAt);
   });
+
+  it("asks the registry again when the last check couldn't reach it", async () => {
+    let down = true;
+    const io = memoryIo(
+      {
+        "/web/package.json": JSON.stringify({ name: "web", dependencies: { a: "^1.0.0" } }),
+        "/web/package-lock.json": JSON.stringify({
+          lockfileVersion: 3,
+          packages: { "": {}, "node_modules/a": { version: "1.0.0" } },
+        }),
+      },
+      {
+        fetch: async () =>
+          down
+            ? new Response("Forbidden", { status: 403 })
+            : jsonResponse(packument("a", { "1.0.0": {}, "1.1.0": {} }, { latest: "1.1.0" })),
+      },
+    );
+    const { svc, close } = await testServices(io);
+    await svc.store.addProject({ id: "p1", name: "web", remote: null, path: "/web" });
+
+    const failed = await refreshProject(svc, "p1");
+    down = false;
+    const retried = await refreshProject(svc, "p1");
+    close();
+
+    expect(failed?.registryErrors.map((e) => e.name)).toEqual(["a"]);
+    expect(retried?.registryErrors).toEqual([]);
+    expect(retried?.outdated.map((e) => e.latest)).toEqual(["1.1.0"]);
+  });
 });
 
 describe("refreshAllProjects", () => {

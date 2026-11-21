@@ -45,8 +45,7 @@ export function UpdateRunDialog({
   const result = progress?.result;
   const onClose = () => {
     if (runId && !result) {
-      const label = name ? `Updating ${name}` : "Updating";
-      dismissedWork.add({ kind: "run", id: runId, label, projectId, path });
+      dismissedWork.add({ kind: "run", id: runId, name: name ?? "", projectId, path });
     } else if (runId) dismissedWork.remove(runId);
     dismiss();
   };

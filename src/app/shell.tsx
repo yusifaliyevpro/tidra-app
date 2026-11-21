@@ -38,23 +38,28 @@ function ActivityStatus() {
   const { data: jobs = [] } = useJobs();
   const running = jobs.filter((j) => j.running);
   const [first] = running;
+  // Chips grow left from the center and the job pill right, so neither moves when the other changes.
   return (
     <div
       data-tauri-drag-region
       aria-live="polite"
-      className="pointer-events-none absolute top-0 left-1/2 z-20 flex h-11 max-w-[44%] -translate-x-1/2 items-center gap-1.5"
+      className="pointer-events-none absolute top-0 left-1/2 z-20 grid h-11 w-[44%] -translate-x-1/2 grid-cols-2 items-center gap-1.5"
     >
-      <DismissedWorkChips />
-      {first ? (
-        <span
-          title={running.map((j) => j.title).join("\n")}
-          className="pointer-events-auto hidden min-w-0 appear-late items-center gap-2 rounded-full bg-selected px-2.5 py-0.5 text-sm text-muted lg:flex"
-        >
-          <Spinner className="size-3 shrink-0" />
-          <span className="truncate">{first.title}</span>
-          {running.length > 1 ? <span className="shrink-0 text-faint tabular">+{running.length - 1}</span> : null}
-        </span>
-      ) : null}
+      <div data-tauri-drag-region className="flex min-w-0 flex-row-reverse items-center gap-1.5">
+        <DismissedWorkChips />
+      </div>
+      <div data-tauri-drag-region className="flex min-w-0 items-center">
+        {first ? (
+          <span
+            title={running.map((j) => j.title).join("\n")}
+            className="pointer-events-auto hidden min-w-0 appear-late items-center gap-2 rounded-full bg-selected px-2.5 py-0.5 text-sm text-muted lg:flex"
+          >
+            <Spinner className="size-3 shrink-0" />
+            <span className="truncate">{first.title}</span>
+            {running.length > 1 ? <span className="shrink-0 text-faint tabular">+{running.length - 1}</span> : null}
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }

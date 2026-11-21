@@ -14,6 +14,11 @@ describe("projectStatus", () => {
     expect(projectStatus(health({ error: "No package.json" }))).toBe("off");
   });
 
+  it("is not up to date when the registry couldn't answer for some packages", () => {
+    expect(projectStatus(health({ unchecked: 2 }))).toBe("off");
+    expect(projectStatus(health({ unchecked: 2, updates: { major: 0, minor: 1, patch: 0 } }))).toBe("minor");
+  });
+
   it("shows update state only, whatever the advisories", () => {
     const h = health({
       updates: { major: 3, minor: 0, patch: 0 },

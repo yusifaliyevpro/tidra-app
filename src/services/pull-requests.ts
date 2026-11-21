@@ -140,9 +140,17 @@ export async function pullTarget(svc: Services, path: string, origin: string | n
     .fork()
     .catch(() => undefined);
   const upstream = fork ? githubSlug(`https://${fork.remote}`) : undefined;
-  return upstream
-    ? { repo: `${upstream.owner}/${upstream.repo}`, remote: "upstream", headOwner: own.owner }
-    : { repo: `${own.owner}/${own.repo}`, remote: "origin", headOwner: own.owner };
+  if (upstream) return { repo: `${upstream.owner}/${upstream.repo}`, remote: "upstream", headOwner: own.owner };
+  // A fork cloned without an `upstream` remote: GitHub still knows its parent (one ETag-cached request).
+  const parent = await forkParent(svc, own.owner, own.repo);
+  return { repo: parent ?? `${own.owner}/${own.repo}`, remote: "origin", headOwner: own.owner };
+}
+
+async function forkParent(svc: Services, owner: string, repo: string): Promise<string | undefined> {
+  const github = await svc.github();
+  if (!github.hasToken) return undefined;
+  const info = await github.repo(owner, repo).catch(() => undefined);
+  return info?.parent?.full_name;
 }
 
 async function pullFor(svc: Services, target: PullTarget | undefined, branch: string): Promise<PullState> {
@@ -229,7 +237,7 @@ export async function openPullRequest(svc: Services, projectId: string): Promise
   const { branch } = await git.status();
   const [owner = "", name = ""] = target.repo.split("/");
   const repo = await github.repo(owner, name);
-  if (!branch || (target.remote === "origin" && branch === repo.default_branch)) {
+  if (!branch || (owner === target.headOwner && branch === repo.default_branch)) {
     throw new Error(`You're on ${branch ?? "a detached HEAD"}. Switch to the branch with your changes first.`);
   }
   await git.push(branch);

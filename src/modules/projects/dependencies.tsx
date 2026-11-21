@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { AlertTriangle, ArrowRight, Clock } from "lucide-react";
+import { AlertTriangle, ArrowRight, Clock, Copy } from "lucide-react";
 import { useId, useState } from "react";
 import { useServices } from "@/app/services";
 import { useListKeys } from "@/app/shortcuts";
@@ -8,14 +8,14 @@ import type { OutdatedEntry } from "@/engine/outdated";
 import type { Bump } from "@/engine/versions";
 import { ChangelogPanel } from "@/modules/changelog-panel";
 import type { ProjectReport } from "@/services/projects";
-import { startUpdate } from "@/services/updates";
+import { startUpdate, updateCommands } from "@/services/updates";
 import { Badge, BumpBadge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { Checkbox } from "@/ui/field";
 import { Empty, ErrorNote, Split } from "@/ui/layout";
 import { Mono } from "@/ui/misc";
 import { ReleaseAge } from "@/ui/time";
-import { toastError } from "@/ui/toast";
+import { toast, toastError } from "@/ui/toast";
 
 const ORDER: Bump[] = ["major", "minor", "patch", "prerelease"];
 const GROUP_LABEL: Record<Bump, string> = {
@@ -92,13 +92,9 @@ export function Dependencies({
     },
   });
 
+  const picks = () => chosen.map((entry) => ({ entry, version: targets[keyOf(entry)] ?? entry.latest }));
   const update = useMutation({
-    mutationFn: () =>
-      startUpdate(
-        svc,
-        projectId,
-        chosen.map((entry) => ({ entry, version: targets[keyOf(entry)] ?? entry.latest })),
-      ),
+    mutationFn: () => startUpdate(svc, projectId, picks()),
     onSuccess: (id) => {
       onStarted(id);
       setPicked(new Set());
@@ -185,6 +181,19 @@ export function Dependencies({
         <span className="ml-auto truncate text-sm text-faint">
           {report.checks.length > 0 ? `Checks: ${report.checks.join(", ")}` : "No checks detected"}
         </span>
+        <Button
+          variant="ghost"
+          aria-label="Copy update command"
+          title={chosen.length === 0 ? "Select packages to copy their update command" : "Copy update command"}
+          icon={<Copy className="size-4" />}
+          disabled={chosen.length === 0}
+          onClick={() =>
+            void updateCommands(svc, projectId, picks())
+              .then((text) => navigator.clipboard.writeText(text))
+              .then(() => toast("Copied the update command."))
+              .catch(toastError)
+          }
+        />
         <Button
           variant="primary"
           disabled={chosen.length === 0}

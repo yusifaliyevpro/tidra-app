@@ -4,6 +4,7 @@ import {
   checkState,
   createGitHub,
   failingSection,
+  readableActionsLog,
   GitHubError,
   runFailed,
   type PullRequest,
@@ -273,5 +274,19 @@ describe("releases paging", () => {
       "https://api.github.com/repos/o/r/releases?per_page=50",
       "https://api.github.com/repos/o/r/releases?per_page=50&page=2",
     ]);
+  });
+});
+
+describe("readableActionsLog", () => {
+  it("turns step groups and error markers into styled lines without the raw markers", () => {
+    const log = ["##[group]Run pnpm test", "shell: bash", "##[endgroup]", "FAIL a.test.ts", "##[error]Exit 1"].join(
+      "\n",
+    );
+    const text = readableActionsLog(log);
+    expect(text).not.toContain("##[");
+    expect(text).toContain("\x1b[1mRun pnpm test\x1b[0m");
+    expect(text).toContain("\x1b[2mshell: bash\x1b[0m");
+    expect(text).toContain("\nFAIL a.test.ts\n");
+    expect(text).toContain("\x1b[1;31mError: Exit 1\x1b[0m");
   });
 });

@@ -109,6 +109,28 @@ export function planAddCommands(workspace: Workspace, selections: Selection[]): 
   }));
 }
 
+/** Runs a command from the project root against `importer`'s folder, with the package manager's own flag. */
+function inImporter(command: Command, importer: string): Command {
+  if (importer === ".") return command;
+  if (command.program === "pnpm") return { ...command, args: ["-C", importer, ...command.args] };
+  if (command.program === "npm") return { ...command, args: [...command.args, "--prefix", importer] };
+  return { ...command, args: ["--cwd", importer, ...command.args] };
+}
+
+/** The update as commands to paste into a terminal at the project root, to run it somewhere else. */
+export function updateScript(workspace: Workspace, selections: Selection[]): string {
+  const catalog = selections.filter((s) => s.entry.catalog);
+  const adds = planAddCommands(workspace, selections).map(({ importer, command }) =>
+    display(inImporter(command, importer)),
+  );
+  return [
+    ...catalog.map(({ entry, version }) => `# Set ${entry.name} to ${version} in the pnpm-workspace.yaml catalog`),
+    ...adds,
+    // An add installs anyway; catalog edits alone need their own install.
+    ...(catalog.length > 0 && adds.length === 0 ? [display(installCommand(workspace.pm))] : []),
+  ].join("\n");
+}
+
 /** `chore(deps): bump react 19.2.0 → 19.3.1` for one package; a summary line plus a list for several. */
 export function commitMessage(selections: Selection[]): string {
   const from = ({ entry }: Selection) => entry.current ?? entry.range;

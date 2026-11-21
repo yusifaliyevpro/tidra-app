@@ -5,6 +5,7 @@ import {
   planFileChanges,
   revertUpdate,
   runUpdate,
+  updateScript,
   type Selection,
 } from "@/engine/apply";
 import type { OutdatedEntry } from "@/engine/outdated";
@@ -150,6 +151,34 @@ describe("planAddCommands", () => {
     expect(planAddCommands(ws, [vite]).map((a) => a.command.args)).toEqual([
       ["install", "vite@8.3.5", "--save-dev", "--save-exact"],
     ]);
+  });
+});
+
+describe("updateScript", () => {
+  it("gives commands to paste at the project root, reaching each package's folder with -C", async () => {
+    const ws = await loadWorkspace(
+      memoryIo({
+        "/r/package.json": '{"devDependencies":{"vite":"8.3.4"}}',
+        "/r/pnpm-workspace.yaml": "packages:\n  - apps/*\n",
+        "/r/apps/web/package.json": '{"name":"web","dependencies":{"react":"^18.3.1"}}',
+      }),
+      "/r",
+    );
+    const webReact: Selection = {
+      ...react,
+      entry: { ...react.entry, usages: [{ importer: "apps/web", field: "dependencies", spec: "^18.3.1" }] },
+    };
+    expect(updateScript(ws, [vite, webReact])).toBe(
+      "pnpm add vite@8.3.5 --save-dev --save-exact --workspace-root\npnpm -C apps/web add react@^19.3.1",
+    );
+  });
+
+  it("names catalog entries to edit by hand, then installs", async () => {
+    const ws = await loadWorkspace(memoryIo({ "/r/package.json": "{}", "/r/pnpm-lock.yaml": "" }), "/r");
+    const catalogReact: Selection = { ...react, entry: { ...react.entry, catalog: "default" } };
+    expect(updateScript(ws, [catalogReact])).toBe(
+      "# Set react to 19.3.1 in the pnpm-workspace.yaml catalog\npnpm install",
+    );
   });
 });
 
