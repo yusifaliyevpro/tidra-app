@@ -2,7 +2,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { DONE_CHIP_MS, DismissedWorkChips } from "@/app/dismissed-work";
+import { DONE_CHIP_MS, ActivityStack } from "@/app/dismissed-work";
 import { ServicesProvider } from "@/app/services";
 import { dismissedWork } from "@/services/dismissed";
 import { createProcessManager } from "@/services/processes";
@@ -44,6 +44,7 @@ afterEach(() => {
   vi.useRealTimers();
   closeServices?.();
   dismissedWork.remove("run-1");
+  dismissedWork.remove("run-2");
 });
 
 async function renderChips() {
@@ -54,14 +55,14 @@ async function renderChips() {
       <ServicesProvider value={{ svc, processes: createProcessManager(svc) }}>
         {/* Like the header's activity area: only the chips themselves take the pointer. */}
         <div style={{ pointerEvents: "none" }}>
-          <DismissedWorkChips />
+          <ActivityStack />
         </div>
       </ServicesProvider>
     </QueryClientProvider>,
   );
 }
 
-describe("DismissedWorkChips", () => {
+describe("ActivityStack", () => {
   it("brings back a dialog that takes clicks, though the header it sits in lets them through", async () => {
     dismissedWork.add({ kind: "run", id: "run-1", name: "app", projectId: "p1", path: "/app" });
     await renderChips();
@@ -95,5 +96,16 @@ describe("DismissedWorkChips", () => {
     await finishRun("run-1", false);
     await advance(DONE_CHIP_MS * 2);
     expect(screen.getByText("Update failed: app")).toBeTruthy();
+  });
+
+  it("shows the newest as the one pill, with a count of the rest that unfold below it", async () => {
+    dismissedWork.add({ kind: "run", id: "run-1", name: "app", projectId: "p1", path: "/app" });
+    dismissedWork.add({ kind: "run", id: "run-2", name: "web", projectId: "p2", path: "/web" });
+    await renderChips();
+    const pill = screen.getByText("Updating web");
+    const more = screen.getByLabelText("1 more");
+    expect(more.textContent).toBe("1");
+    // The older one sits in the folded panel, not beside the pill, so the pill stays centered.
+    expect(pill.closest(".group > div")?.contains(screen.getByText("Updating app"))).toBe(false);
   });
 });
