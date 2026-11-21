@@ -1,5 +1,6 @@
+import { cn } from "cn";
 import { CircleCheck, CircleX, X } from "lucide-react";
-import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { dismissedWork, type DismissedWork } from "@/services/dismissed";
 import { subscribeRun } from "@/services/updates";
@@ -42,26 +43,21 @@ function useForgetWhenDone(id: string, done: boolean, paused: boolean) {
   }, [id, done, paused]);
 }
 
-function WorkChip({ work, onOpen }: { work: DismissedWork; onOpen: () => void }) {
+function WorkChip({ work, paused, onOpen }: { work: DismissedWork; paused: boolean; onOpen: () => void }) {
   const processes = useProcessList();
   const runState = useRunState(work.id, work.kind === "run");
-  const [hovered, setHovered] = useState(false);
   const proc = work.kind === "process" ? processes.find((p) => p.id === work.id) : undefined;
   const state: State =
     work.kind === "run" ? runState : proc?.running ? "running" : proc?.exitCode === 0 ? "ok" : "failed";
-  useForgetWhenDone(work.id, state === "ok", hovered);
+  useForgetWhenDone(work.id, state === "ok", paused);
   const label = chipLabel(work, state);
   return (
-    <span
-      onPointerEnter={() => setHovered(true)}
-      onPointerLeave={() => setHovered(false)}
-      className="pointer-events-auto flex h-6 min-w-0 shrink animate-pop-in items-center rounded-full bg-selected text-sm text-muted"
-    >
+    <span className="pointer-events-auto flex h-6 max-w-full min-w-0 animate-pop-in items-center rounded-full bg-selected text-sm text-muted">
       <button
         type="button"
         title="Show output"
         onClick={onOpen}
-        className="flex h-full min-w-0 items-center gap-2 rounded-l-full pr-1 pl-2.5 hover:text-fg"
+        className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-l-full pr-1 pl-2.5 hover:text-fg"
       >
         {state === "running" ? (
           <Spinner className="size-3 shrink-0" />
@@ -84,17 +80,69 @@ function WorkChip({ work, onOpen }: { work: DismissedWork; onOpen: () => void })
   );
 }
 
-/** Output dialogs closed while their work ran, as chips that bring them back from any screen. */
-export function DismissedWorkChips() {
+/**
+ * Dismissed output dialogs and the running job, as one centered pill: the newest shows, hovering expands the rest
+ * below it. One at a time keeps the header symmetric whatever comes and goes.
+ */
+export function ActivityStack({ job }: { job?: ReactNode }) {
   const items = useSyncExternalStore(dismissedWork.subscribe, dismissedWork.snapshot);
   const [open, setOpen] = useState<DismissedWork>();
+  const [hovered, setHovered] = useState(false);
+  const entries = [
+    ...items.toReversed().map((work) => ({
+      key: work.id,
+      node: <WorkChip work={work} paused={hovered} onOpen={() => setOpen(work)} />,
+    })),
+    ...(job ? [{ key: "job", node: job }] : []),
+  ];
+  const [first, ...rest] = entries;
   return (
     <>
-      {items.map((work) => (
-        <WorkChip key={work.id} work={work} onOpen={() => setOpen(work)} />
-      ))}
+      {first ? (
+        <div
+          onPointerEnter={() => setHovered(true)}
+          onPointerLeave={() => setHovered(false)}
+          className="group pointer-events-auto relative flex max-w-full min-w-0 justify-center"
+        >
+          <div key={first.key} className="relative flex max-w-full min-w-0 justify-center">
+            {first.node}
+            {rest.length > 0 ? (
+              <span
+                aria-label={`${rest.length} more`}
+                className="absolute -top-1.5 -right-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full border border-line-strong bg-raised px-1 text-[10px] leading-none font-medium text-muted tabular"
+              >
+                {rest.length}
+              </span>
+            ) : null}
+          </div>
+          {rest.length > 0 ? <MoreActivity entries={rest} /> : null}
+        </div>
+      ) : null}
       {createPortal(<ReopenedDialog open={open} setOpen={setOpen} />, document.body)}
     </>
+  );
+}
+
+/** The rest of the stack, unfolding below the pill on hover or keyboard focus; its top padding bridges the gap. */
+function MoreActivity({ entries }: { entries: { key: string; node: ReactNode }[] }) {
+  return (
+    <div
+      className={cn(
+        "absolute top-full left-1/2 w-max max-w-[min(360px,80vw)] -translate-x-1/2 pt-1.5",
+        "invisible origin-top -translate-y-1 scale-95 opacity-0 transition-[opacity,transform,visibility] duration-140 ease-out",
+        "group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:scale-100 group-focus-within:opacity-100",
+        "group-hover:visible group-hover:translate-y-0 group-hover:scale-100 group-hover:opacity-100",
+        "motion-reduce:transform-none",
+      )}
+    >
+      <div className="flex flex-col gap-1 rounded-xl border border-line-strong bg-raised p-1 shadow-pop">
+        {entries.map((entry) => (
+          <div key={entry.key} className="flex min-w-0 *:w-full">
+            {entry.node}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
