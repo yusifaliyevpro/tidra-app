@@ -152,6 +152,7 @@ export async function buildReport(
     const reuse =
       previous &&
       !previous.error &&
+      previous.registryErrors.length === 0 &&
       previous.fingerprint === workspace.fingerprint &&
       previous.checkedAt &&
       Date.parse(base.updatedAt) - Date.parse(previous.checkedAt) < REUSE_MS;

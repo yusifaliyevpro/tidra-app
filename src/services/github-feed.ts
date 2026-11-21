@@ -1,6 +1,7 @@
 import {
   checkState,
   failingSection,
+  readableActionsLog,
   runFailed,
   type CheckState,
   type GitHubNotification,
@@ -182,17 +183,20 @@ export async function refreshCi(svc: Services, only?: Set<string>): Promise<CiSn
 
 export const readCi = async (svc: Services) => (await readSnapshot<CiSnapshot>(svc, "ci"))?.data;
 
-/** The failing part of the first failed job's log in a run. */
-export async function failedLog(
-  svc: Services,
-  repo: string,
-  runId: number,
-): Promise<{ job: string; log: string } | undefined> {
+export interface FailedJob {
+  job: string;
+  steps: { name: string; conclusion?: string | null }[];
+  log: string;
+}
+
+/** The first failed job of a run: its steps and the failing step's log, styled like GitHub shows it. */
+export async function failedLog(svc: Services, repo: string, runId: number): Promise<FailedJob | undefined> {
   const github = await svc.github();
   const jobs = await github.runJobs(repo, runId);
   const failed = jobs.find(runFailed) ?? jobs[0];
   if (!failed) return undefined;
-  return { job: failed.name, log: failingSection(await github.jobLog(repo, failed.id)) };
+  const steps = (failed.steps ?? []).map((s) => ({ name: s.name, conclusion: s.conclusion }));
+  return { job: failed.name, steps, log: readableActionsLog(failingSection(await github.jobLog(repo, failed.id))) };
 }
 
 export interface BotPullsSnapshot {

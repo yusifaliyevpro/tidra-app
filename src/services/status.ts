@@ -11,7 +11,7 @@ export const STATUS_LABEL: Record<Status, string> = {
   off: "Not checked",
 };
 
-type HealthLike = Pick<ProjectHealth, "updates" | "security" | "failsAudit" | "error">;
+type HealthLike = Pick<ProjectHealth, "updates" | "security" | "failsAudit" | "error" | "unchecked">;
 
 /** A project's update state, riskiest wins. Advisories have their own column and screen, so they don't change it. */
 export function projectStatus(health: HealthLike | undefined, checking = false): Status {
@@ -19,5 +19,5 @@ export function projectStatus(health: HealthLike | undefined, checking = false):
   if (!health || health.error) return "off";
   if (health.updates.major > 0) return "major";
   if (health.updates.minor + health.updates.patch > 0) return "minor";
-  return "ok";
+  return health.unchecked ? "off" : "ok";
 }

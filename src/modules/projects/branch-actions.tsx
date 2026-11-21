@@ -292,7 +292,6 @@ function OpenPullRequestButton({ projectId, size }: { projectId: string; size: S
   return (
     <Button
       size={size}
-      variant="primary"
       icon={<GitPullRequestArrow className={iconClass(size)} />}
       loading={open.isPending}
       onClick={only(() => open.mutate())}

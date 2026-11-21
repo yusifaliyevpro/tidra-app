@@ -1,10 +1,11 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { RotateCcw } from "lucide-react";
+import { cn } from "cn";
+import { CircleCheck, CircleSlash, CircleX, ExternalLink, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import { useServices } from "@/app/services";
 import { runFailed, type WorkflowRun } from "@/integrations/github";
 import { latestRun, runTone } from "@/services/ci-status";
-import { failedLog, refreshCi, type CiEntry } from "@/services/github-feed";
+import { failedLog, refreshCi, type CiEntry, type FailedJob } from "@/services/github-feed";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { Dialog } from "@/ui/dialog";
@@ -110,6 +111,13 @@ function FailedLogDialog({ repo, run, onClose }: { repo: string; run?: WorkflowR
       onClose={onClose}
       title={log.data ? `Failed job: ${log.data.job}` : "Failed job"}
       className="w-[880px]"
+      footer={
+        run ? (
+          <Button icon={<ExternalLink className="size-4" />} onClick={() => openExternal(run.html_url)}>
+            Open on GitHub
+          </Button>
+        ) : null
+      }
     >
       {log.isPending ? (
         <div className="flex justify-center p-8">
@@ -118,8 +126,37 @@ function FailedLogDialog({ repo, run, onClose }: { repo: string; run?: WorkflowR
       ) : log.error ? (
         <ErrorNote>{log.error.message}</ErrorNote>
       ) : (
-        <Log text={log.data?.log ?? ""} className="h-[60vh]" />
+        <div className="flex flex-col gap-3">
+          {log.data?.steps.length ? <JobSteps steps={log.data.steps} /> : null}
+          <Log text={log.data?.log ?? ""} className="h-[52vh]" />
+        </div>
       )}
     </Dialog>
   );
+}
+
+/** The job's steps with how each ended, so the failed one stands out before reading its log. */
+function JobSteps({ steps }: { steps: FailedJob["steps"] }) {
+  return (
+    <ol className="flex max-h-40 flex-col overflow-auto rounded-md border border-line">
+      {steps.map((step, index) => (
+        <li
+          key={`${index}-${step.name}`}
+          className={cn(
+            "flex h-7 shrink-0 items-center gap-2 px-2.5 text-sm",
+            step.conclusion === "failure" ? "bg-bad/13 text-fg" : "text-muted",
+          )}
+        >
+          <StepIcon conclusion={step.conclusion} />
+          <span className="truncate">{step.name}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function StepIcon({ conclusion }: { conclusion?: string | null }) {
+  if (conclusion === "success") return <CircleCheck aria-label="Passed" className="size-3.5 shrink-0 text-ok" />;
+  if (conclusion === "failure") return <CircleX aria-label="Failed" className="size-3.5 shrink-0 text-bad" />;
+  return <CircleSlash aria-label={conclusion ?? "Did not run"} className="size-3.5 shrink-0 text-ghost" />;
 }

@@ -81,6 +81,7 @@ const RepoSchema = z.compile(
     stargazers_count: z.number(),
     open_issues_count: z.number(),
     html_url: z.string(),
+    parent: z.optional(z.looseObject({ full_name: z.string() })),
   }),
 );
 export type RepoInfo = z.infer<typeof RepoSchema>;
@@ -324,6 +325,35 @@ export function createGitHub(options: {
 }
 
 export type GitHub = ReturnType<typeof createGitHub>;
+
+const sgr = (codes: string, text: string) => `\x1b[${codes}m${text}\x1b[0m`;
+const COMMAND_STYLE: Record<string, (text: string) => string> = {
+  error: (text) => sgr("1;31", `Error: ${text}`),
+  warning: (text) => sgr("33", `Warning: ${text}`),
+  notice: (text) => sgr("36", `Notice: ${text}`),
+  command: (text) => sgr("36", text),
+  debug: (text) => sgr("2", text),
+  section: (text) => sgr("1", text),
+};
+
+/** Turns Actions' `##[group]`/`##[error]` markers into styled lines, the way GitHub shows a step's log. */
+export function readableActionsLog(log: string): string {
+  let inGroup = false;
+  const out: string[] = [];
+  for (const line of log.split("\n")) {
+    const [, command = "", text = ""] = /^##\[(\w+)\](.*)$/.exec(line) ?? [];
+    const style = COMMAND_STYLE[command];
+    if (command === "group") {
+      inGroup = true;
+      if (out.length > 0) out.push("");
+      out.push(sgr("1", text));
+    } else if (command === "endgroup") inGroup = false;
+    else if (style) out.push(style(text));
+    // A step's inputs and env sit inside its group: dimmed, like GitHub's folded step header.
+    else out.push(inGroup ? sgr("2", line) : line);
+  }
+  return out.join("\n");
+}
 
 /** Keeps only the failing step's section of a job log, which is what you actually read. */
 export function failingSection(log: string, maxLines = 400): string {

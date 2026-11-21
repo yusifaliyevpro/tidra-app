@@ -8,6 +8,7 @@ import {
   type StepState,
   type UpdateResult,
   type UpdateStep,
+  updateScript,
 } from "@/engine/apply";
 import { createLimit } from "@/engine/limit";
 import type { OutdatedEntry } from "@/engine/outdated";
@@ -128,6 +129,13 @@ async function launchUpdate(svc: Services, projectId: string, picks: UpdatePick[
 }
 
 /** Starts an update in the background and returns its run id; progress streams to subscribers and is saved to `runs`. */
+/** What an update would run, for the user to paste into a terminal of their own. */
+export async function updateCommands(svc: Services, projectId: string, picks: UpdatePick[]): Promise<string> {
+  const project = await svc.store.getProject(projectId);
+  if (!project?.path) throw new Error("This project has no folder on this device.");
+  return updateScript(await loadWorkspace(svc.io, project.path), picks);
+}
+
 export async function startUpdate(svc: Services, projectId: string, picks: UpdatePick[]): Promise<string> {
   const { runId, done } = await launchUpdate(svc, projectId, picks);
   done.catch(() => undefined);

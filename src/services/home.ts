@@ -46,6 +46,8 @@ export interface ProjectHealth {
   behind: number;
   ci: CiState;
   error?: string;
+  /** Packages the registry couldn't answer for, so "no updates" isn't known. */
+  unchecked?: number;
   score: number;
 }
 
@@ -170,6 +172,7 @@ export async function homeSummary(svc: Services): Promise<HomeSummary> {
       behind: git?.behind ?? 0,
       ci: (repo?.github ? ciInfo.byRepo.get(repo.github.toLowerCase()) : undefined) ?? "none",
       error: report?.error,
+      unchecked: report?.registryErrors.length ?? 0,
     };
     return { ...base, score: healthScore(base) };
   });
