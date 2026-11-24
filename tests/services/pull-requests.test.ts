@@ -27,14 +27,19 @@ describe("pullTarget", () => {
     const { svc, close } = await testServices(memoryIo({}, { run: remotes("git@github.com:the-jk-labs/omicron.git") }));
     const target = await pullTarget(svc, "/r", "github.com/yusifaliyevpro/omicron");
     close();
-    expect(target).toEqual({ repo: "the-jk-labs/omicron", remote: "upstream", headOwner: "yusifaliyevpro" });
+    expect(target).toEqual({
+      repo: "the-jk-labs/omicron",
+      remote: "upstream",
+      headOwner: "yusifaliyevpro",
+      headRepo: "omicron",
+    });
   });
 
   it("targets origin when there is no upstream remote", async () => {
     const { svc, close } = await testServices(memoryIo({}, { run: remotes() }));
     const target = await pullTarget(svc, "/r", "github.com/me/app");
     close();
-    expect(target).toEqual({ repo: "me/app", remote: "origin", headOwner: "me" });
+    expect(target).toEqual({ repo: "me/app", remote: "origin", headOwner: "me", headRepo: "app" });
   });
 
   it("targets the parent of a fork cloned without an upstream remote", async () => {
@@ -57,7 +62,7 @@ describe("pullTarget", () => {
     await svc.setSecret(SECRET_KEYS.github, "ghp_test");
     const target = await pullTarget(svc, "/r", "github.com/me/docs");
     close();
-    expect(target).toEqual({ repo: "acme/docs", remote: "origin", headOwner: "me" });
+    expect(target).toEqual({ repo: "acme/docs", remote: "origin", headOwner: "me", headRepo: "docs" });
   });
 });
 
@@ -206,6 +211,47 @@ describe("openPullRequest", () => {
       head: "me:tidra/deps-1",
       base: "main",
       body: "<!-- tidra:commits -->\n- oxfmt 0.75.0 → 0.76.0\n- vite 8.3.4 → 8.3.5\n<!-- /tidra:commits -->",
+    });
+  });
+
+  it("names the fork as head repo when it belongs to the same owner as its parent", async () => {
+    const requests: { method: string; body?: unknown }[] = [];
+    const io = memoryIo(
+      {},
+      {
+        run: (program, args) => {
+          if (program !== "git") return ok();
+          if (args[0] === "status") return ok("# branch.oid a\n# branch.head tidra/deps-1\n");
+          if (args.join(" ") === "remote get-url upstream") return ok("https://github.com/acme/docs.git\n");
+          if (args[0] === "log") return ok(COMMITS);
+          return ok();
+        },
+        fetch: async (input, init) => {
+          const url = new Request(input, init).url;
+          const method = init?.method ?? "GET";
+          requests.push({ method, body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined });
+          if (url.endsWith("/repos/acme/docs"))
+            return jsonResponse({
+              full_name: "acme/docs",
+              default_branch: "main",
+              stargazers_count: 0,
+              open_issues_count: 0,
+              html_url: "u",
+            });
+          if (url.includes("/pulls?state=all")) return jsonResponse([]);
+          return jsonResponse({ html_url: "https://github.com/acme/docs/pull/9" });
+        },
+      },
+    );
+    const { svc, close } = await testServices(io);
+    await svc.setSecret(SECRET_KEYS.github, "ghp_test");
+    await svc.store.addProject({ id: "p1", name: "docs", remote: "github.com/acme/docs-fork", path: "/docs" });
+    await openPullRequest(svc, "p1");
+    close();
+    expect(requests.find((r) => r.method === "POST")?.body).toMatchObject({
+      head: "acme:tidra/deps-1",
+      head_repo: "docs-fork",
+      base: "main",
     });
   });
 

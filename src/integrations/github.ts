@@ -297,8 +297,10 @@ export function createGitHub(options: {
             `is:pr is:open archived:false author:app/dependabot author:app/renovate ${repos.map((r) => `repo:${r}`).join(" ")}`,
             100,
           ),
-    createPull: (repo: string, input: { title: string; head: string; base: string; body: string }) =>
-      json(`/repos/${repo}/pulls`, CreatedPull, { method: "POST", body: JSON.stringify(input) }),
+    createPull: (
+      repo: string,
+      input: { title: string; head: string; head_repo?: string; base: string; body: string },
+    ) => json(`/repos/${repo}/pulls`, CreatedPull, { method: "POST", body: JSON.stringify(input) }),
     updatePull: (repo: string, number: number, input: { title?: string; body: string }) =>
       json(`/repos/${repo}/pulls/${number}`, CreatedPull, { method: "PATCH", body: JSON.stringify(input) }),
 
