@@ -104,11 +104,32 @@ function channelTarget(tags: Record<string, string>, channel: string): string | 
 const newerOf = (a: string | undefined, b: string | undefined) =>
   a && b && semver.valid(a) && semver.valid(b) ? (semver.gt(a, b) ? a : b) : (a ?? b);
 
+const globRegex = (glob: string) => new RegExp(`^${glob.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*")}$`);
+
+/**
+ * pnpm's `minimumReleaseAgeExclude` entries: `name`, a `@scope/*` glob, or `name@1.2.3 || 1.2.4`, which exempts only
+ * those versions. Returns whether one version of a package is exempt.
+ */
+function ageExemption(entries: string[], name: string): (version: string) => boolean {
+  const versionSpecs: string[] = [];
+  for (const entry of entries) {
+    const at = entry.indexOf("@", 1);
+    const pattern = at === -1 ? entry : entry.slice(0, at);
+    if (!globRegex(pattern).test(name)) continue;
+    if (at === -1) return () => true;
+    versionSpecs.push(entry.slice(at + 1));
+  }
+  return (version) =>
+    versionSpecs.some((spec) =>
+      spec.split("||").some((v) => v.trim() === version || semver.satisfies(version, v, { includePrerelease: true })),
+    );
+}
+
 /** Picks the newest version this project may install: channel-aware, pinned majors, and old enough. */
 export function pickLatest(
   packument: Packument,
   current: string | undefined,
-  options: { pinMajor: boolean; minAgeMinutes: number; now: Date },
+  options: { pinMajor: boolean; minAgeMinutes: number; now: Date; exempt?: (version: string) => boolean },
 ): { version: string | undefined; heldBackByAge: boolean; newest?: string } {
   const tags = packument["dist-tags"];
   const channel = current ? prereleaseChannel(current) : undefined;
@@ -127,6 +148,7 @@ export function pickLatest(
 
   const cutoff = options.now.getTime() - options.minAgeMinutes * 60_000;
   const oldEnough = (v: string) => {
+    if (options.exempt?.(v)) return true;
     const published = packument.time?.[v];
     return published !== undefined && Date.parse(published) <= cutoff;
   };
@@ -173,7 +195,6 @@ export async function computeOutdated(
 ): Promise<OutdatedResult> {
   const pins = new Set(options.majorPins ?? DEFAULT_MAJOR_PINS);
   const now = options.now ?? new Date();
-  const ageExclude = new Set(workspace.minimumReleaseAgeExclude.map((e) => e.replace(/@[^@/]*$/, "")));
   const errors: { name: string; message: string }[] = [];
   const waiting = new Set<OutdatedEntry>();
 
@@ -184,13 +205,16 @@ export async function computeOutdated(
         if (!options.includeUpToDate && (await onLatest(registry, candidate.name, current, pins))) return undefined;
         const abbreviated = await registry.abbreviated(candidate.name);
         if (!abbreviated) return undefined;
-        const minAge = ageExclude.has(candidate.name) ? 0 : workspace.minimumReleaseAgeMinutes;
+        const minAge = workspace.minimumReleaseAgeMinutes;
+        const exempt = ageExemption(workspace.minimumReleaseAgeExclude, candidate.name);
         const pinMajor = pins.has(candidate.name);
         const quick = pickLatest(abbreviated, current, { pinMajor, minAgeMinutes: 0, now });
         // Publish times only come with the full document: the age rule and each row's release time need them.
         const needsFull = quick.version !== undefined && quick.version !== current;
         const packument = needsFull ? ((await registry.full(candidate.name)) ?? abbreviated) : abbreviated;
-        const picked = needsFull ? pickLatest(packument, current, { pinMajor, minAgeMinutes: minAge, now }) : quick;
+        const picked = needsFull
+          ? pickLatest(packument, current, { pinMajor, minAgeMinutes: minAge, now, exempt })
+          : quick;
         const bumpTo = (version: string) => (current ? classifyBump(current, version) : "none");
 
         let latest = picked.version;
@@ -203,7 +227,7 @@ export async function computeOutdated(
         if (bump === "none" && !options.includeUpToDate) return undefined;
         const cutoff = now.getTime() - minAge * 60_000;
         const installable = Object.keys(packument.versions).filter(
-          (v) => isWaiting || publishedBefore(packument, v, cutoff),
+          (v) => isWaiting || exempt(v) || publishedBefore(packument, v, cutoff),
         );
         const wanted = semver.maxSatisfying(installable, candidate.range) ?? undefined;
         const meta = packument.versions[latest];
