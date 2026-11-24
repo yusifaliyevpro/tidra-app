@@ -98,8 +98,14 @@ function deprecationOf(packument: Packument, version: string | undefined): strin
 /** A prerelease user's next version: the tag named after their channel, or any tag on it (rc builds under `next`). */
 function channelTarget(tags: Record<string, string>, channel: string): string | undefined {
   if (tags[channel]) return tags[channel];
-  return sortVersionsDesc(Object.values(tags)).find((version) => prereleaseChannel(version) === channel);
+  return sortVersionsDesc(Object.values(tags)).find(
+    (version) => prereleaseChannel(version) === channel && onlyNumbersAfterChannel(version),
+  );
 }
+
+// `8.0.0-rc.35-dev.197` is a dev build (its own `dev` tag), not the next rc.
+const onlyNumbersAfterChannel = (version: string) =>
+  (semver.prerelease(version) ?? []).slice(1).every((part) => typeof part === "number");
 
 const newerOf = (a: string | undefined, b: string | undefined) =>
   a && b && semver.valid(a) && semver.valid(b) ? (semver.gt(a, b) ? a : b) : (a ?? b);
