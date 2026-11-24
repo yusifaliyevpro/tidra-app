@@ -130,6 +130,8 @@ interface PullTarget {
   remote: "origin" | "upstream";
   /** Owner of the pushed branch, for the `owner:branch` head. */
   headOwner: string;
+  /** Name of the repo the branch is pushed to: origin, which is a fork when `repo` is its parent. */
+  headRepo: string;
 }
 
 /** A fork's pull requests go to the repo it was forked from; the branch itself is pushed to the fork. */
@@ -140,10 +142,16 @@ export async function pullTarget(svc: Services, path: string, origin: string | n
     .fork()
     .catch(() => undefined);
   const upstream = fork ? githubSlug(`https://${fork.remote}`) : undefined;
-  if (upstream) return { repo: `${upstream.owner}/${upstream.repo}`, remote: "upstream", headOwner: own.owner };
+  if (upstream)
+    return {
+      repo: `${upstream.owner}/${upstream.repo}`,
+      remote: "upstream",
+      headOwner: own.owner,
+      headRepo: own.repo,
+    };
   // A fork cloned without an `upstream` remote: GitHub still knows its parent (one ETag-cached request).
   const parent = await forkParent(svc, own.owner, own.repo);
-  return { repo: parent ?? `${own.owner}/${own.repo}`, remote: "origin", headOwner: own.owner };
+  return { repo: parent ?? `${own.owner}/${own.repo}`, remote: "origin", headOwner: own.owner, headRepo: own.repo };
 }
 
 async function forkParent(svc: Services, owner: string, repo: string): Promise<string | undefined> {
@@ -237,7 +245,8 @@ export async function openPullRequest(svc: Services, projectId: string): Promise
   const { branch } = await git.status();
   const [owner = "", name = ""] = target.repo.split("/");
   const repo = await github.repo(owner, name);
-  if (!branch || (owner === target.headOwner && branch === repo.default_branch)) {
+  const fromFork = target.repo !== `${target.headOwner}/${target.headRepo}`;
+  if (!branch || (!fromFork && branch === repo.default_branch)) {
     throw new Error(`You're on ${branch ?? "a detached HEAD"}. Switch to the branch with your changes first.`);
   }
   await git.push(branch);
@@ -256,6 +265,8 @@ export async function openPullRequest(svc: Services, projectId: string): Promise
     head: `${target.headOwner}:${branch}`,
     base: repo.default_branch,
     body: pullBody(messages),
+    // `owner:branch` alone can't tell a fork from its parent when one owner has both.
+    ...(fromFork && owner === target.headOwner ? { head_repo: target.headRepo } : {}),
   });
   await refreshRepo(svc, projectId);
   return { url: pull.html_url, created: true };
