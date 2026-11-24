@@ -364,6 +364,20 @@ describe("pickLatest edge cases", () => {
     });
   });
 
+  it("keeps an rc user off dev builds of that rc", () => {
+    const prisma = packument(
+      "prisma",
+      { "8.0.0-rc.10": {}, "8.0.0-rc.35": {}, "8.0.0-rc.35-dev.197": {} },
+      { latest: "8.0.0-rc.35", next: "8.0.0-rc.10", dev: "8.0.0-rc.35-dev.197" },
+    );
+    expect(pickLatest(prisma, "8.0.0-rc.35", { pinMajor: false, minAgeMinutes: 0, now: NOW }).version).toBe(
+      "8.0.0-rc.35",
+    );
+    expect(pickLatest(prisma, "8.0.0-rc.10", { pinMajor: false, minAgeMinutes: 0, now: NOW }).version).toBe(
+      "8.0.0-rc.35",
+    );
+  });
+
   it("moves a prerelease user to a newer stable release", () => {
     const released = packument("c", { "2.0.0-rc.1": {}, "2.0.0": {} }, { latest: "2.0.0", rc: "2.0.0-rc.1" });
     expect(pickLatest(released, "2.0.0-rc.0", { pinMajor: false, minAgeMinutes: 0, now: NOW }).version).toBe("2.0.0");
