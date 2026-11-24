@@ -209,6 +209,48 @@ describe("pickLatest with minimumReleaseAge", () => {
     expect(result.entries[0]?.readyAt).toBeUndefined();
     expect(result.waiting).toEqual([]);
   });
+
+  it("keeps the age rule for versions an exclude entry doesn't name", async () => {
+    const ws = await workspaceWith(
+      { dependencies: { vite: "8.3.0" } },
+      pnpmLock({ vite: "8.3.0" }),
+      ageYaml("vite@8.3.4"),
+    );
+    const result = await computeOutdated(ws, fakeRegistry([doc]), { now: NOW });
+    expect(result.entries).toMatchObject([{ latest: "8.3.4", heldBackByAge: true }]);
+  });
+
+  it("lists an update as waiting when the exclude entry names another version", async () => {
+    const ws = await workspaceWith(
+      { dependencies: { vite: "8.3.4" } },
+      pnpmLock({ vite: "8.3.4" }),
+      ageYaml("vite@8.3.4"),
+    );
+    const result = await computeOutdated(ws, fakeRegistry([doc]), { now: NOW });
+    expect(result.entries).toEqual([]);
+    expect(result.waiting).toMatchObject([{ latest: "8.3.5" }]);
+  });
+
+  it("exempts only the versions an exclude entry names", async () => {
+    const ws = await workspaceWith(
+      { dependencies: { vite: "8.3.4" } },
+      pnpmLock({ vite: "8.3.4" }),
+      ageYaml("vite@8.3.4 || 8.3.5"),
+    );
+    const result = await computeOutdated(ws, fakeRegistry([doc]), { now: NOW });
+    expect(result.entries).toMatchObject([{ latest: "8.3.5", heldBackByAge: false }]);
+  });
+
+  it("exempts scoped packages a wildcard exclude entry matches", async () => {
+    const scoped = { ...doc, name: "@acme/vite" };
+    const ws = await workspaceWith(
+      { dependencies: { "@acme/vite": "8.3.4" } },
+      pnpmLock({ "@acme/vite": "8.3.4" }),
+      ageYaml("@acme/*"),
+    );
+    const result = await computeOutdated(ws, fakeRegistry([scoped]), { now: NOW });
+    expect(result.entries).toMatchObject([{ name: "@acme/vite", latest: "8.3.5" }]);
+  });
 });
 
 const INSTALLED: Record<string, string> = { react: "18.3.1", vite: "8.3.5" };
