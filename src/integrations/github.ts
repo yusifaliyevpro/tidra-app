@@ -24,6 +24,32 @@ const ReleaseSchema = z.looseObject({
 });
 const Releases = z.compile(z.array(ReleaseSchema));
 
+const ErrorBody = z.compile(
+  z.looseObject({
+    message: z.string(),
+    errors: z.optional(
+      z.array(
+        z.looseObject({ message: z.optional(z.string()), field: z.optional(z.string()), code: z.optional(z.string()) }),
+      ),
+    ),
+  }),
+);
+
+/** GitHub's message plus the reasons a 422 lists, which "Validation Failed" alone leaves out. */
+function errorText(text: string): string | undefined {
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (!z.validate(ErrorBody, data)) return undefined;
+  const reasons = (data.errors ?? [])
+    .map((e) => e.message ?? [e.field, e.code].filter(Boolean).join(" "))
+    .filter(Boolean);
+  return reasons.length ? `${data.message} (${reasons.join("; ")})` : data.message;
+}
+
 const RateLimitBody = z.compile(
   z.looseObject({
     resources: z.looseObject({
@@ -199,7 +225,7 @@ export function createGitHub(options: {
       const text = await response.text().catch(() => "");
       const message = limited
         ? "GitHub rate limit reached. Add a token in Settings to raise it."
-        : `GitHub ${response.status}: ${/"message":"([^"]+)"/.exec(text)?.[1] ?? response.statusText}`;
+        : `GitHub ${response.status}: ${errorText(text) ?? response.statusText}`;
       throw new GitHubError(message, response.status, limited);
     }
     return response;

@@ -22,6 +22,11 @@ const remotes = (upstream?: string) => (_program: string, args: string[]) => {
   return { code: 1, stdout: "", stderr: "" };
 };
 
+const movedOrigin = (program: string, args: string[]) =>
+  args.join(" ") === "remote get-url origin"
+    ? ok("git@github.com:yusifaliyevpro/omicron-docs.git\n")
+    : remotes("git@github.com:the-jk-labs/omicron-docs.git")(program, args);
+
 describe("pullTarget", () => {
   it("targets the upstream repo of a fork, with the branch from the fork as head", async () => {
     const { svc, close } = await testServices(memoryIo({}, { run: remotes("git@github.com:the-jk-labs/omicron.git") }));
@@ -32,6 +37,18 @@ describe("pullTarget", () => {
       remote: "upstream",
       headOwner: "yusifaliyevpro",
       headRepo: "omicron",
+    });
+  });
+
+  it("takes the head from the checkout's origin when origin moved to a fork after the project was added", async () => {
+    const { svc, close } = await testServices(memoryIo({}, { run: movedOrigin }));
+    const target = await pullTarget(svc, "/r", "github.com/the-jk-labs/omicron-docs");
+    close();
+    expect(target).toEqual({
+      repo: "the-jk-labs/omicron-docs",
+      remote: "upstream",
+      headOwner: "yusifaliyevpro",
+      headRepo: "omicron-docs",
     });
   });
 

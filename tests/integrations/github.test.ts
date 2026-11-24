@@ -99,6 +99,25 @@ describe("GitHub requests", () => {
     await expect(github.repo("o", "r")).rejects.toThrow("GitHub 401: Bad credentials");
   });
 
+  it("adds the reasons GitHub lists under a validation failure", async () => {
+    const { github } = fakeGitHub(() =>
+      Response.json(
+        {
+          message: "Validation Failed",
+          errors: [
+            { resource: "PullRequest", code: "custom", message: "No commits between master and me:fix" },
+            { resource: "PullRequest", field: "head", code: "invalid" },
+          ],
+        },
+        { status: 422 },
+      ),
+    );
+    const input = { title: "t", head: "me:fix", base: "master", body: "" };
+    await expect(github.createPull("o/r", input)).rejects.toThrow(
+      "GitHub 422: Validation Failed (No commits between master and me:fix; head invalid)",
+    );
+  });
+
   it("marks an exhausted rate limit and says how to raise it", async () => {
     const { github } = fakeGitHub(() => new Response("{}", { status: 403, headers: { "x-ratelimit-remaining": "0" } }));
     const error = await github.repo("o", "r").catch((e: unknown) => e);

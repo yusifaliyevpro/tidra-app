@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { runs } from "@/core/db/schema";
-import { createGit, githubSlug, isClean, type GitStatus } from "@/engine/git";
+import { createGit, githubSlug, isClean, normalizeRemote, type GitStatus } from "@/engine/git";
 import { nextPullTitle, pullBody, pullTitle } from "@/engine/pull-request";
 import type { Services } from "./context";
 import { checkoutOf, refreshProject, type GitInfoCache } from "./projects";
@@ -136,11 +136,13 @@ interface PullTarget {
 
 /** A fork's pull requests go to the repo it was forked from; the branch itself is pushed to the fork. */
 export async function pullTarget(svc: Services, path: string, origin: string | null): Promise<PullTarget | undefined> {
-  const own = origin ? githubSlug(`https://${origin}`) : undefined;
+  const git = createGit(svc.io, path);
+  // The stored remote is from when the project was added; origin may since point at a fork.
+  const live = await git.remoteUrl().catch(() => undefined);
+  const current = (live && normalizeRemote(live)) || origin;
+  const own = current ? githubSlug(`https://${current}`) : undefined;
   if (!own) return undefined;
-  const fork = await createGit(svc.io, path)
-    .fork()
-    .catch(() => undefined);
+  const fork = await git.fork().catch(() => undefined);
   const upstream = fork ? githubSlug(`https://${fork.remote}`) : undefined;
   if (upstream)
     return {
