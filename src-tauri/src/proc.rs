@@ -145,6 +145,29 @@ fn kill_tree(pid: u32, force: bool) {
     }
 }
 
+const AGENT_VARS: [&str; 9] = [
+    "AI_AGENT",
+    "CLAUDECODE",
+    "CURSOR_AGENT",
+    "GEMINI_CLI",
+    "CODEX_SANDBOX",
+    "CODEX_THREAD_ID",
+    "COPILOT_CLI",
+    "OPENCODE",
+    "JUNIE_DATA",
+];
+
+/// Variables a coding agent set when it launched Tidra; tools like greenly read them and switch to agent output.
+fn agent_markers(vars: impl Iterator<Item = (String, String)>) -> Vec<String> {
+    vars.filter(|(key, value)| {
+        AGENT_VARS.contains(&key.as_str())
+            || key.starts_with("CLAUDE_CODE")
+            || (key == "TERM_PROGRAM" && value == "kiro")
+    })
+    .map(|(key, _)| key)
+    .collect()
+}
+
 #[tauri::command]
 pub async fn proc_spawn(
     request: SpawnRequest,
@@ -158,6 +181,9 @@ pub async fn proc_spawn(
         command.current_dir(cwd);
     }
     command.env("PATH", crate::env_path::path());
+    for key in agent_markers(std::env::vars()) {
+        command.env_remove(key);
+    }
     if let Some(env) = &request.env {
         command.envs(env);
     }
@@ -221,6 +247,23 @@ pub fn proc_which(program: String) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drops_the_markers_coding_agents_leave_in_the_environment() {
+        let vars = [
+            ("CLAUDECODE", "1"),
+            ("CLAUDE_CODE_ENTRYPOINT", "cli"),
+            ("AI_AGENT", "claude-code"),
+            ("CODEX_SANDBOX", "seatbelt"),
+            ("TERM_PROGRAM", "kiro"),
+            ("PATH", "/usr/bin"),
+            ("HOME", "/home/me"),
+            ("CLAUDE_CONFIG_DIR", "/x"),
+        ]
+        .map(|(k, v)| (k.to_string(), v.to_string()));
+        let dropped = agent_markers(vars.into_iter());
+        assert_eq!(dropped, ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "AI_AGENT", "CODEX_SANDBOX", "TERM_PROGRAM"]);
+    }
 
     #[tokio::test]
     async fn exit_is_not_held_back_by_a_pipe_that_never_closes() {
